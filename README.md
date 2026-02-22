@@ -1,4 +1,4 @@
-# 🌊 NautiCAI — Underwater Infrastructure Inspection Copilot
+# 🌊 NautiCAI — Underwater Infrastructure Inspection 
 
 > **AI-powered subsea defect detection · Real-time risk scoring · Automated PDF reporting**
 > Singapore Maritime AI Systems · Est. 2024 · v1.0.4
