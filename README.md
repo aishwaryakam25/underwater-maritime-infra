@@ -154,6 +154,16 @@ yolo export model=yolov8s.pt format=engine device=0
 
 ---
 
+## ⚡ Inference Speed
+
+| Hardware | Speed |
+|---|---|
+| RTX 3050 Ti | ~28ms |
+| Jetson Orin (TensorRT) | ~18ms / 55FPS |
+| CPU only | ~500ms |
+
+---
+
 ## 👩‍💻 Author
 
 **Aishwarya V**

@@ -46,6 +46,7 @@ DEFECT_CLASSES = [
     "Corrosion","Crack","Marine Growth","Biofouling","Paint Damage","Pitting",
     "Weld Defect","Anode Damage","Coating Failure","Dent","Deformation","Fracture",
     "Spalling","Scaling","Disbondment","CP Failure","Leakage","Blockage","Foreign Object",
+    "Free Span","No Defect",
 ]
 SEVERITY_MAP = {
     "Corrosion":"Critical","Crack":"Critical","Fracture":"Critical","Leakage":"Critical",
@@ -53,6 +54,7 @@ SEVERITY_MAP = {
     "CP Failure":"High","Pitting":"Medium","Paint Damage":"Medium","Coating Failure":"Medium",
     "Deformation":"Medium","Blockage":"Medium","Dent":"Low","Scaling":"Low",
     "Spalling":"Low","Disbondment":"Low","Foreign Object":"Low",
+    "Free Span":"Critical","No Defect":"Low",
 }
 CLASS_REMAP = {
     "pipeline": "Corrosion",
@@ -63,6 +65,19 @@ CLASS_REMAP = {
     "leakage": "Leakage",
     "anomaly": "Crack",
     "biofouling": "Biofouling",
+    "bilge_keel": "Coating Failure",
+    "draft_mark": "Paint Damage",
+    "ropeguard": "Foreign Object",
+    "rudder": "Deformation",
+    "sea_chest": "Blockage",
+    "thruster_blades": "Weld Defect",
+    "thruster_grating": "Disbondment",
+    "flange": "Weld Defect",
+    "buoy": "Foreign Object",
+    "bend_restrictor": "Deformation",
+    "pipe_coupling": "Coating Failure",
+    "free_span": "Free Span",
+    "healthy": "No Defect",
 }
 SEV_COLORS = {"Critical":(220,50,50),"High":(255,165,0),"Medium":(0,180,255),"Low":(0,220,130)}
 PIPELINE_DEFECTS = ["Corrosion","Crack","Coating Failure","Pitting","Leakage","Weld Defect","Blockage"]
@@ -451,6 +466,17 @@ def apply_edge_estimator(bgr):
     gray=cv2.cvtColor(bgr,cv2.COLOR_BGR2GRAY);edges=cv2.Canny(gray,50,150)
     ec=cv2.cvtColor(edges,cv2.COLOR_GRAY2BGR);ec[:,:,0]=0;ec[:,:,2]=0;ec[:,:,1]=edges
     return cv2.addWeighted(bgr,.75,ec,.8,0)
+def apply_marine_snow(pil_img, intensity=0.5):
+    img_array = np.array(pil_img)
+    num_particles = int(300 * intensity)
+    for _ in range(num_particles):
+        x = np.random.randint(0, img_array.shape[1])
+        y = np.random.randint(0, img_array.shape[0])
+        radius = np.random.randint(1, 4)
+        brightness = np.random.randint(150, 255)
+        cv2.circle(img_array, (x, y), radius,
+                  (brightness, brightness, brightness), -1)
+    return Image.fromarray(img_array)
 def full_enhance(pil_img,use_clahe,use_green,turb_in,corr_turb,use_edge,clahe_clip=3.0):
     bgr=pil_to_cv(pil_img)
     if turb_in>.01: bgr=apply_turbidity(bgr,turb_in)
@@ -470,10 +496,17 @@ def load_yolo(path):
 def _detect_real(img,conf_thr,iou_thr):
     try:
         model=load_yolo(str(MODEL_PATH));results=model.predict(img,conf=conf_thr,iou=iou_thr,verbose=False)[0];dets=[]
+        det_id=0
         for i,box in enumerate(results.boxes):
             x1,y1,x2,y2=map(int,box.xyxy[0].tolist());conf=float(box.conf[0]);cls_i=int(box.cls[0])
+            # Skip boxes covering more than 70% of image
+            img_w,img_h=img.width if hasattr(img,'width') else img.shape[1],img.height if hasattr(img,'height') else img.shape[0]
+            box_area=(x2-x1)*(y2-y1);img_area=img_w*img_h
+            if img_area>0 and box_area/img_area>0.70:
+                continue
             cls=model.names.get(cls_i,DEFECT_CLASSES[cls_i%len(DEFECT_CLASSES)]);cls=CLASS_REMAP.get(cls,cls);sev=SEVERITY_MAP.get(cls,"Medium")
-            dets.append(dict(id=i+1,cls=cls,severity=sev,conf=conf,x1=x1,y1=y1,x2=x2,y2=y2,area=(x2-x1)*(y2-y1)))
+            det_id+=1
+            dets.append(dict(id=det_id,cls=cls,severity=sev,conf=conf,x1=x1,y1=y1,x2=x2,y2=y2,area=box_area))
         return dets
     except Exception as e:
         st.warning(f"YOLO error: {e}"); return []
@@ -596,6 +629,7 @@ with st.sidebar:
     use_edge    =st.toggle("Edge Estimator",value=False)
     turbidity_in=st.slider("Turbidity Level",0.0,1.0,0.0,.05)
     corr_turb   =st.toggle("Turbidity Correction",value=True)
+    marine_snow =st.toggle("Marine Snow",value=False)
     st.divider()
     st.markdown("#### Mission Info")
     vessel_name=st.text_input("Vessel Name",placeholder="e.g. MV Neptune Star")
@@ -645,6 +679,8 @@ with tab_scan:
         with st.spinner("Applying visibility filters…"):
             prog.progress(20)
             enhanced=full_enhance(pil_orig,use_clahe,use_green,turbidity_in,corr_turb,use_edge,clahe_clip)
+            if marine_snow:
+                enhanced=apply_marine_snow(enhanced,intensity=0.5)
             st.session_state.enhanced_img=enhanced
         with st.spinner("Running YOLOv8 detection…"):
             prog.progress(55)
@@ -771,6 +807,8 @@ with tab_hull:
         st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
         with st.spinner("Running hull detection…"):
             enh=full_enhance(h_img,use_clahe,use_green,turbidity_in,corr_turb,use_edge,clahe_clip)
+            if marine_snow:
+                enh=apply_marine_snow(enh,intensity=0.5)
             hd=run_detection(enh,conf_thr,iou_thr,"hull")
             ha=annotate_image(enh,hd)
         rh=compute_risk(hd);gh=score_to_grade(rh)
