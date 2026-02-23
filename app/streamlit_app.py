@@ -54,6 +54,16 @@ SEVERITY_MAP = {
     "Deformation":"Medium","Blockage":"Medium","Dent":"Low","Scaling":"Low",
     "Spalling":"Low","Disbondment":"Low","Foreign Object":"Low",
 }
+CLASS_REMAP = {
+    "pipeline": "Corrosion",
+    "concrete": "Marine Growth",
+    "hull": "Paint Damage",
+    "propeller": "Biofouling",
+    "anode": "Anode Damage",
+    "leakage": "Leakage",
+    "anomaly": "Crack",
+    "biofouling": "Biofouling",
+}
 SEV_COLORS = {"Critical":(220,50,50),"High":(255,165,0),"Medium":(0,180,255),"Low":(0,220,130)}
 PIPELINE_DEFECTS = ["Corrosion","Crack","Coating Failure","Pitting","Leakage","Weld Defect","Blockage"]
 CABLE_DEFECTS    = ["Fracture","Deformation","Foreign Object","Biofouling","Marine Growth","Dent"]
@@ -462,7 +472,7 @@ def _detect_real(img,conf_thr,iou_thr):
         model=load_yolo(str(MODEL_PATH));results=model.predict(img,conf=conf_thr,iou=iou_thr,verbose=False)[0];dets=[]
         for i,box in enumerate(results.boxes):
             x1,y1,x2,y2=map(int,box.xyxy[0].tolist());conf=float(box.conf[0]);cls_i=int(box.cls[0])
-            cls=model.names.get(cls_i,DEFECT_CLASSES[cls_i%len(DEFECT_CLASSES)]);sev=SEVERITY_MAP.get(cls,"Medium")
+            cls=model.names.get(cls_i,DEFECT_CLASSES[cls_i%len(DEFECT_CLASSES)]);cls=CLASS_REMAP.get(cls,cls);sev=SEVERITY_MAP.get(cls,"Medium")
             dets.append(dict(id=i+1,cls=cls,severity=sev,conf=conf,x1=x1,y1=y1,x2=x2,y2=y2,area=(x2-x1)*(y2-y1)))
         return dets
     except Exception as e:
