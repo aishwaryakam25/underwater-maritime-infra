@@ -501,10 +501,11 @@ def _detect_real(img,conf_thr,iou_thr):
             x1,y1,x2,y2=map(int,box.xyxy[0].tolist());conf=float(box.conf[0]);cls_i=int(box.cls[0])
             # Skip boxes covering more than 70% of image
             img_w,img_h=img.width if hasattr(img,'width') else img.shape[1],img.height if hasattr(img,'height') else img.shape[0]
-            box_area=(x2-x1)*(y2-y1);img_area=img_w*img_h
-            if img_area>0 and box_area/img_area>0.70:
+            box_area=(x2-x1)*(y2-y1);img_area=img_w*img_h;coverage=box_area/img_area if img_area>0 else 0
+            if coverage>0.50 or coverage<0.005:
                 continue
-            cls=model.names.get(cls_i,DEFECT_CLASSES[cls_i%len(DEFECT_CLASSES)]);cls=CLASS_REMAP.get(cls,cls);sev=SEVERITY_MAP.get(cls,"Medium")
+            cls_name=model.names.get(cls_i,DEFECT_CLASSES[cls_i%len(DEFECT_CLASSES)])
+            cls=CLASS_REMAP.get(cls_name,CLASS_REMAP.get(cls_name.lower(),cls_name));sev=SEVERITY_MAP.get(cls,"Medium")
             det_id+=1
             dets.append(dict(id=det_id,cls=cls,severity=sev,conf=conf,x1=x1,y1=y1,x2=x2,y2=y2,area=box_area))
         return dets
