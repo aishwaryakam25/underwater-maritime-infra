@@ -496,30 +496,43 @@ def run_detection(img,conf_thr,iou_thr,mode):
 # ANNOTATION + HEATMAP
 # ══════════════════════════════════════════════════════════════════════════
 def annotate_image(pil_img,dets):
-    out=pil_img.copy().convert("RGBA");draw=ImageDraw.Draw(out,"RGBA");W,H=out.size
-    try:
-        fb=ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",14)
-        fs=ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",11)
-    except: fb=fs=ImageFont.load_default()
-    for d in dets:
-        col=SEV_COLORS.get(d["severity"],(200,200,200));c4=col+(210,);f4=col+(35,)
-        x1,y1,x2,y2=d["x1"],d["y1"],d["x2"],d["y2"]
-        draw.rectangle([x1,y1,x2,y2],fill=f4,outline=c4,width=2)
-        acc=14
-        for sx,sy,ex,ey in [(x1,y1,x1+acc,y1),(x1,y1,x1,y1+acc),(x2,y1,x2-acc,y1),(x2,y1,x2,y1+acc),
-                             (x1,y2,x1+acc,y2),(x1,y2,x1,y2-acc),(x2,y2,x2-acc,y2),(x2,y2,x2,y2-acc)]:
-            draw.line([(sx,sy),(ex,ey)],fill=c4,width=3)
-        lbl=f"[{d['id']:02d}] {d['cls']} {d['conf']*100:.0f}%"
-        bb=draw.textbbox((0,0),lbl,font=fb);tw,th=bb[2]-bb[0],bb[3]-bb[1]
-        ty=y1-th-6 if y1-th-6>0 else y1+4
-        draw.rectangle([x1,ty-2,x1+tw+10,ty+th+4],fill=col+(200,))
-        draw.text((x1+5,ty),lbl,fill=(10,20,30),font=fb)
-        draw.ellipse([x1+4,y1+4,x1+12,y1+12],fill=c4)
-    wm=f"NautiCAI · {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} · {len(dets)} detections"
-    bb2=draw.textbbox((0,0),wm,font=fs);tw2=bb2[2]-bb2[0]
-    draw.rectangle([0,H-22,W,H],fill=(5,12,26,210))
-    draw.text(((W-tw2)//2,H-18),wm,fill=(76,201,255,220),font=fs)
-    return out.convert("RGB")
+    # Convert to RGBA for transparency support
+    img = pil_img.copy().convert("RGBA")
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    SEVERITY_COLORS = {
+        "Critical": (255, 50, 50),
+        "High": (255, 165, 0),
+        "Medium": (30, 144, 255),
+        "Low": (50, 205, 50)
+    }
+
+    for det in dets:
+        x1 = int(det['x1'])
+        y1 = int(det['y1'])
+        x2 = int(det['x2'])
+        y2 = int(det['y2'])
+        sev = det.get('severity', 'Medium')
+        color = SEVERITY_COLORS.get(sev, (30, 144, 255))
+
+        # Transparent fill
+        draw.rectangle(
+            [x1, y1, x2, y2],
+            fill=(*color, 40),      # 40 = very transparent
+            outline=(*color, 255),  # solid border
+            width=3
+        )
+
+        # Label text
+        label = f"[{det['id']:02d}] {det['cls']} {det['conf']*100:.0f}%"
+        draw.rectangle([x1, y1-20, x1+len(label)*7, y1],
+                      fill=(*color, 200))
+        draw.text((x1+2, y1-18), label, fill=(255,255,255,255))
+
+    # Blend overlay onto original
+    result = Image.alpha_composite(img, overlay)
+    return result.convert("RGB")
 
 def build_heatmap(img,dets):
     W,H=img.size;heat=np.zeros((H,W),dtype=np.float32)
