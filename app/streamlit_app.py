@@ -20,12 +20,23 @@ from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
     Table, TableStyle, Image as RLImage, HRFlowable, PageBreak)
 
 from pdf_report import build_pdf
+from huggingface_hub import hf_hub_download
 
 ROOT = Path(__file__).resolve().parent.parent
 APP  = Path(__file__).resolve().parent
 
+# Auto-download model from Hugging Face
+if not os.path.exists(ROOT / "best.pt"):
+    print("Downloading model from Hugging Face...")
+    hf_hub_download(
+        repo_id="aishwarya252525/nauticai-yolov8",
+        filename="best.pt",
+        local_dir=str(ROOT),
+        local_dir_use_symlinks=False
+    )
+
 def _find_model():
-    for n in ["yolov8s.pt","yolov8n.pt","best.pt"]:
+    for n in ["best.pt","yolov8s.pt","yolov8n.pt"]:
         p = ROOT/n
         if p.exists(): return p
     return None
