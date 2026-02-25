@@ -210,7 +210,7 @@ def build_pdf(
     meta = {
         "mission_id": mission_id,
         "vessel": vessel or "N/A",
-        "model": "YOLOv8s",
+        "model": "NautiCAI Vision Engine",
         "date": ts,
     }
 
@@ -272,7 +272,7 @@ def build_pdf(
     meta_data = [
         ["Mission ID", mission_id, "Vessel", vessel or "N/A"],
         ["Inspector", inspector, "Scan Mode", mode.upper()],
-        ["Date / Time", ts, "Model", "YOLOv8s"],
+        ["Date / Time", ts, "Model", "NautiCAI Vision Engine"],
         ["Conf. Threshold", f"{conf_thr:.2f}", "IoU Threshold", f"{iou_thr:.2f}"],
     ]
     meta_tbl = Table(meta_data, colWidths=[34 * mm, 54 * mm, 34 * mm, 54 * mm])
@@ -570,8 +570,8 @@ def build_pdf(
     edge_data = [
         ["Target Platform", "NVIDIA Jetson AGX Orin 64 GB / Orin NX 16 GB"],
         ["Inference Engine", "TensorRT 8.x  |  INT8 / FP16  |  ONNX Runtime"],
-        ["Model Export", "yolov8n.pt  \u2192  TensorRT .engine  (34 \u2013 95 FPS)"],
-        ["Throughput", "YOLOv8n \u2248 95 FPS  |  YOLOv8s \u2248 55 FPS  |  YOLOv8m \u2248 34 FPS"],
+        ["Model Export", "Detection model ONNX  \u2192  TensorRT .engine  (34 \u2013 95 FPS)"],
+        ["Throughput", "Edge model \u2248 95 FPS  |  Balanced model \u2248 55 FPS  |  Heavy model \u2248 34 FPS"],
         ["Power Envelope", "15 \u2013 60 W (configurable power modes)"],
         ["Video Pipeline", "RTSP \u2192 GStreamer \u2192 OpenCV \u2192 inference"],
         ["End-to-End Latency", "\u2248 28 ms"],

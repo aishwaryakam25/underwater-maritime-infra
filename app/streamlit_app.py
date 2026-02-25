@@ -489,7 +489,7 @@ def full_enhance(pil_img,use_clahe,use_green,turb_in,corr_turb,use_edge,clahe_cl
 # ══════════════════════════════════════════════════════════════════════════
 # DETECTION
 # ══════════════════════════════════════════════════════════════════════════
-@st.cache_resource(show_spinner="Loading YOLO model…")
+@st.cache_resource(show_spinner="Loading detection model…")
 def load_yolo(path):
     from ultralytics import YOLO
     return YOLO(path)
@@ -510,7 +510,7 @@ def _detect_real(img,conf_thr,iou_thr):
             dets.append(dict(id=det_id,cls=cls,severity=sev,conf=conf,x1=x1,y1=y1,x2=x2,y2=y2,area=box_area))
         return dets
     except Exception as e:
-        st.warning(f"YOLO error: {e}"); return []
+        st.warning(f"Detection model error: {e}"); return []
 def _detect_synthetic(img,conf_thr,pool):
     w,h=img.size;rng=np.random.default_rng(sum(img.tobytes()[:64]));n=rng.integers(3,9);dets=[]
     for i in range(n):
@@ -660,7 +660,7 @@ with tab_scan:
     ui_section(
         "NAUTICAI / INFRASTRUCTURE SCAN",
         "Infrastructure Scan",
-        "AI-powered underwater defect detection · YOLOv8 · 19 defect classes · annotated output + professional report"
+        "AI-powered underwater defect detection · 19 defect classes · annotated output + professional report"
     )
     st.divider()
 
@@ -683,7 +683,7 @@ with tab_scan:
             if marine_snow:
                 enhanced=apply_marine_snow(enhanced,intensity=0.5)
             st.session_state.enhanced_img=enhanced
-        with st.spinner("Running YOLOv8 detection…"):
+        with st.spinner("Running detection model…"):
             prog.progress(55)
             dets=run_detection(enhanced,conf_thr,iou_thr,scan_mode)
         SEV_RANK={"Critical":4,"High":3,"Medium":2,"Low":1}
@@ -1121,10 +1121,10 @@ with tab_cable:
         st.markdown("""
 | Model | Quantisation | Latency | FPS (Jetson Orin) |
 |---|---|---|---|
-| YOLOv8n | INT8-TRT | 10 ms | ~95 FPS |
-| YOLOv8s | INT8-TRT | 18 ms | ~55 FPS |
-| YOLOv8m | INT8-TRT | 28 ms | ~34 FPS |
-| YOLOv8x | FP16-TRT | 48 ms | ~20 FPS |
+| Edge-N | INT8-TRT | 10 ms | ~95 FPS |
+| Edge-S | INT8-TRT | 18 ms | ~55 FPS |
+| Edge-M | INT8-TRT | 28 ms | ~34 FPS |
+| Edge-X | FP16-TRT | 48 ms | ~20 FPS |
         """)
 
 # ─── DASHBOARD ───────────────────────────────────────────────────────────
@@ -1164,7 +1164,7 @@ with tab_dash:
     else:
         st.info("No missions yet — run a scan on the Infrastructure Scan tab.")
 
-    with st.expander("Model Performance Metrics — YOLOv8s"):
+    with st.expander("Model Performance Metrics — Vision Engine"):
         mets={"Precision":.942,"Recall":.891,"mAP@0.5":.914,"mAP@0.5:0.95":.783,"F1 Score":.916}
         cols_m=st.columns(len(mets))
         for col_m,(k,v) in zip(cols_m,mets.items()): col_m.metric(k,f"{v*100:.1f}%")
@@ -1362,5 +1362,5 @@ st.markdown("""
 <div style='text-align:center;color:rgba(159,179,200,0.55);font-size:11px;padding:8px 0;
   font-family:JetBrains Mono,monospace;letter-spacing:1px'>
   NautiCAI · Singapore Maritime AI Systems · Est. 2024 · v1.0.4 ·
-  YOLOv8 · OpenCV · Streamlit · ReportLab · NVIDIA Jetson Orin
+  Vision AI Engine · OpenCV · Streamlit · ReportLab · NVIDIA Jetson Orin
 </div>""",unsafe_allow_html=True)
