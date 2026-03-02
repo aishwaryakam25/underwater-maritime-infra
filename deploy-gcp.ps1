@@ -44,16 +44,27 @@ if (-not $gcloud) {
     exit 1
 }
 
-# Check docker
+# Check docker (installed and daemon running)
 $docker = Get-Command docker -ErrorAction SilentlyContinue
 if (-not $docker) {
-    Write-Error "Docker not found. Install Docker and ensure it is running."
+    Write-Error "Docker not found. Install Docker Desktop from https://docs.docker.com/desktop/install/windows-install/"
+    exit 1
+}
+$ErrorActionPreferenceSave = $ErrorActionPreference
+$ErrorActionPreference = 'SilentlyContinue'
+try { & docker info 2>&1 | Out-Null } catch { }
+$dockerOk = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $ErrorActionPreferenceSave
+if (-not $dockerOk) {
+    Write-Host "Docker is installed but the daemon is not running." -ForegroundColor Red
+    Write-Host "  -> Start Docker Desktop from the Start menu and wait until it is fully running (whale icon in tray)." -ForegroundColor Yellow
+    Write-Host "  -> Then run this script again." -ForegroundColor Yellow
     exit 1
 }
 
-# Set project (ignore environment-tag warning; gcloud may still exit non-zero)
+# Set project (ignore environment-tag warning; gcloud.ps1 can throw on stderr)
 Write-Host "[1/9] Setting project to $ProjectId..." -ForegroundColor Yellow
-& gcloud config set project $ProjectId 2>&1 | Out-Null
+try { & gcloud config set project $ProjectId 2>&1 | Out-Null } catch { }
 $currentProject = (gcloud config get-value project 2>$null)
 if ($currentProject -ne $ProjectId) {
     Write-Error "Failed to set project. Run: gcloud auth login"
@@ -63,21 +74,15 @@ Write-Host "  Project set. (Ignore environment-tag message if shown; deploy will
 
 # Enable APIs
 Write-Host "[2/9] Enabling APIs..." -ForegroundColor Yellow
-& gcloud services enable run.googleapis.com artifactregistry.googleapis.com firebasehosting.googleapis.com --quiet 2>&1 | Out-Null
+try { & gcloud services enable run.googleapis.com artifactregistry.googleapis.com firebasehosting.googleapis.com --quiet 2>&1 | Out-Null } catch { }
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "Some APIs may already be enabled or need billing. Continuing."
 }
 
 # Artifact Registry repo (ignore if exists)
 Write-Host "[3/9] Configuring Artifact Registry..." -ForegroundColor Yellow
-& gcloud artifacts repositories create nauticai-repo --repository-format=docker --location=$Region 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    $err = $Error[0].ToString()
-    if ($err -notmatch "already exists") {
-        Write-Warning "Could not create repo (may already exist). Continuing."
-    }
-}
-& gcloud auth configure-docker "${Region}-docker.pkg.dev" --quiet 2>&1 | Out-Null
+try { & gcloud artifacts repositories create nauticai-repo --repository-format=docker --location=$Region 2>&1 | Out-Null } catch { }
+try { & gcloud auth configure-docker "${Region}-docker.pkg.dev" --quiet 2>&1 | Out-Null } catch { }
 
 # Build and push image
 $IMAGE = "${Region}-docker.pkg.dev/${ProjectId}/nauticai-repo/nauticai-backend:latest"
@@ -130,7 +135,7 @@ if (-not [string]::IsNullOrWhiteSpace($TwilioSid) -and -not [string]::IsNullOrWh
 } else {
     Write-Host "  Twilio not set; add in Console later for WhatsApp (see WHATSAPP_SETUP.md)." -ForegroundColor Gray
 }
-& gcloud run services update nauticai-api --region $Region --set-env-vars $envVars --quiet 2>&1 | Out-Null
+try { & gcloud run services update nauticai-api --region $Region --set-env-vars $envVars --quiet 2>&1 | Out-Null } catch { }
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "Env vars update failed; set them manually in Cloud Run Console."
 }
