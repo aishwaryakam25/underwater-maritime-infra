@@ -1,0 +1,18 @@
+# Cloud Build config for frontend — bakes backend URL into the React app
+# Used by deploy-gcp.sh after backend is deployed (REACT_APP_API_URL is required).
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-f"
+      - "Dockerfile.frontend"
+      - "--build-arg"
+      - "REACT_APP_API_URL=${_REACT_APP_API_URL}"
+      - "-t"
+      - "${_FRONTEND_IMAGE}"
+      - "."
+substitutions:
+  _REACT_APP_API_URL: ""
+  _FRONTEND_IMAGE: "gcr.io/${PROJECT_ID}/nauticai-web"
+images:
+  - "${_FRONTEND_IMAGE}"

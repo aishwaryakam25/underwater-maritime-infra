@@ -49,3 +49,41 @@ export const runVideoDetection = (file, params) => {
   Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
   return api.post("/api/video/detect", fd).then(r => r.data);
 };
+
+/** Download PDF report for video (ROV footage) */
+export const downloadVideoPDF = async (file, params) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
+  const resp = await api.post("/api/report/pdf/video", fd, { responseType: "blob" });
+  const url = window.URL.createObjectURL(new Blob([resp.data], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = resp.headers["content-disposition"]?.split("filename=")[1]?.replace(/"/g, "") || "NautiCAI_Video_Report.pdf";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+/** Send PDF report to WhatsApp (image report). Returns { sent, message, download_url? } */
+export const sendPDFToWhatsApp = async (file, params) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
+  const { data } = await api.post("/api/report/pdf/send-whatsapp", fd);
+  return data;
+};
+
+/** Send video PDF report to WhatsApp */
+export const sendVideoPDFToWhatsApp = async (file, params) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
+  const { data } = await api.post("/api/report/pdf/video/send-whatsapp", fd);
+  return data;
+};
+
+/** Send a text message to WhatsApp (alerts). */
+export const sendWhatsAppMessage = (to, message) =>
+  api.post("/api/whatsapp/send", { to, message }).then((r) => r.data);

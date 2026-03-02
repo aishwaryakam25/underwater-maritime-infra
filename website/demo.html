@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Try NautiCAI Demo — Sign up to access</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect fill='%230a0e1a' width='32' height='32'/><circle cx='16' cy='14' r='6' fill='%2322d3ee' opacity='0.9'/></svg>" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    .gate {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      background: var(--bg);
+    }
+    .gate-card {
+      max-width: 420px;
+      width: 100%;
+      padding: 2.5rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+    }
+    .gate-card h1 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .gate-card p {
+      color: var(--text-secondary);
+      font-size: 0.9375rem;
+      margin-bottom: 1.5rem;
+    }
+    .gate-card label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+      color: var(--text-secondary);
+    }
+    .gate-card input[type="text"],
+    .gate-card input[type="email"],
+    .gate-card input[type="tel"] {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+    }
+    .gate-card input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .gate-card .checkbox-wrap {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .gate-card .checkbox-wrap input {
+      width: auto;
+      margin: 0;
+    }
+    .gate-card .checkbox-wrap span {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+    .gate-card .btn-block {
+      width: 100%;
+      padding: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: var(--accent);
+      color: var(--bg-deep);
+      font-family: inherit;
+      font-size: 0.9375rem;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    .gate-card .btn-block:hover {
+      background: var(--accent-hover);
+      box-shadow: 0 0 24px rgba(34, 211, 238, 0.3);
+    }
+    .gate-card .btn-block:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+    .gate-card .back {
+      display: inline-block;
+      margin-top: 1rem;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .gate-card .back:hover { color: var(--accent); }
+    .gate-card .hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: -0.5rem;
+      margin-bottom: 1rem;
+    }
+    .gate-card .error {
+      font-size: 0.8125rem;
+      color: #f87171;
+      margin-bottom: 1rem;
+    }
+    .gate-card .backend-hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-deep);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+    }
+    .gate-card .backend-hint code { font-family: ui-monospace, monospace; font-size: 0.7rem; }
+    .gate-card .btn-outline:hover { background: var(--accent-dim); }
+  </style>
+</head>
+<body data-app-url="/app/" data-api-url="">
+  <div class="gate">
+    <div class="gate-card">
+      <h1>Try NautiCAI Demo</h1>
+      <p>Sign up once to access the inspection demo. Get reports and alerts on WhatsApp when you enable it.</p>
+      <p id="backend-hint" class="backend-hint" style="display: none;">From project root: <code>run-website.ps1</code> or <code>uvicorn backend.main:app --port 8000</code>.</p>
+      <form id="demo-form">
+        <div id="form-error" class="error" style="display:none;"></div>
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required placeholder="Your name" />
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required placeholder="you@company.com" />
+        <label for="whatsapp">WhatsApp number (optional)</label>
+        <input type="tel" id="whatsapp" name="whatsapp" placeholder="+65 9123 4567" />
+        <p class="hint">Include country code. We’ll send PDF reports and alerts here when you generate them.</p>
+        <div class="checkbox-wrap">
+          <input type="checkbox" id="alerts_whatsapp" name="alerts_whatsapp" />
+          <span for="alerts_whatsapp">Send me alerts and report links on WhatsApp</span>
+        </div>
+        <button type="submit" class="btn-block" id="submit-btn">Sign up & open demo</button>
+        <button type="button" class="btn-block btn-outline mt-2" id="test-alert-btn" style="display:none; margin-top: 0.75rem; background: transparent; border: 1px solid var(--accent-border); color: var(--accent);">
+          📱 Send test alert to my WhatsApp
+        </button>
+        <p id="test-alert-msg" class="hint" style="margin-top: 0.5rem; display: none;"></p>
+      </form>
+      <a href="index.html" class="back">← Back to website</a>
+    </div>
+  </div>
+  <script>
+    (function() {
+      var form = document.getElementById("demo-form");
+      var submitBtn = document.getElementById("submit-btn");
+      var errEl = document.getElementById("form-error");
+
+      function getAppUrl() {
+        var appUrl = document.body.getAttribute("data-app-url") || "/app/";
+        if (window.location.port === "8080" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
+          appUrl = "http://localhost:3000";
+        }
+        return appUrl;
+      }
+
+      function getApiUrl() {
+        var apiUrl = document.body.getAttribute("data-api-url");
+        if (apiUrl) return apiUrl;
+        if (window.location.port === "8080" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
+          return "http://localhost:8000";
+        }
+        return "";
+      }
+
+      form.addEventListener("submit", function(e) {
+        e.preventDefault();
+        var name = document.getElementById("name").value.trim();
+        var email = document.getElementById("email").value.trim();
+        var whatsapp = document.getElementById("whatsapp").value.trim();
+        var alerts = document.getElementById("alerts_whatsapp").checked;
+
+        errEl.style.display = "none";
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Signing up…";
+
+        var apiBase = getApiUrl();
+        var payload = { name: name, email: email, whatsapp: whatsapp, alerts_whatsapp: alerts };
+
+        function grantAndRedirect() {
+          sessionStorage.setItem("nauticai-demo-access", "1");
+          sessionStorage.setItem("nauticai-demo-user", JSON.stringify({
+            name: name,
+            email: email,
+            whatsapp: whatsapp,
+            alerts_whatsapp: alerts
+          }));
+          var appUrl = getAppUrl();
+          window.location.href = appUrl + "?demo=1&name=" + encodeURIComponent(name) + "&email=" + encodeURIComponent(email) + "&whatsapp=" + encodeURIComponent(whatsapp);
+        }
+
+        if (apiBase) {
+          fetch(apiBase + "/api/signup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          })
+            .then(function(res) { return res.json().catch(function() { return {}; }); })
+            .then(function() { grantAndRedirect(); })
+            .catch(function() {
+              grantAndRedirect();
+            });
+        } else {
+          grantAndRedirect();
+        }
+      });
+
+      var testBtn = document.getElementById("test-alert-btn");
+      var testMsg = document.getElementById("test-alert-msg");
+      var whatsappInput = document.getElementById("whatsapp");
+      function toggleTestBtn() {
+        testBtn.style.display = whatsappInput.value.trim() ? "block" : "none";
+      }
+      whatsappInput.addEventListener("input", toggleTestBtn);
+      whatsappInput.addEventListener("blur", toggleTestBtn);
+      toggleTestBtn();
+
+      (function showBackendHint() {
+        if (!getApiUrl() || window.location.port !== "8080") return;
+        var h = document.getElementById("backend-hint");
+        if (!h) return;
+        fetch(getApiUrl() + "/api/health", { method: "GET" })
+          .then(function(r) { return r.ok; })
+          .catch(function() { return false; })
+          .then(function(ok) {
+            if (!ok) h.style.display = "block";
+          });
+      })();
+      testBtn.addEventListener("click", function() {
+        var to = whatsappInput.value.trim();
+        if (!to) return;
+        var apiBase = getApiUrl();
+        if (!apiBase) {
+          testMsg.textContent = "API not configured. Run the backend to enable test alerts.";
+          testMsg.style.display = "block";
+          return;
+        }
+        testBtn.disabled = true;
+        testMsg.textContent = "Sending…";
+        testMsg.style.display = "block";
+        testMsg.style.color = "var(--text-muted)";
+        fetch(apiBase + "/api/whatsapp/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: to.replace(/\s/g, ""),
+            message: "NautiCAI test alert — You're all set for inspection alerts and PDF report links. Try the demo!"
+          })
+        })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.sent) {
+              testMsg.textContent = "Test alert sent. Check your WhatsApp.";
+              testMsg.style.color = "var(--accent)";
+            } else {
+              var msg = data.message || "Could not send.";
+              if (msg.indexOf("not configured") !== -1 || msg.indexOf("TWILIO") !== -1) {
+                testMsg.innerHTML = "WhatsApp is optional. Sign up and the demo work without it. To enable alerts: set <code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, <code>TWILIO_WHATSAPP_FROM</code> in your backend environment.";
+                testMsg.style.color = "var(--text-muted)";
+              } else {
+                testMsg.textContent = msg;
+                testMsg.style.color = "#f87171";
+              }
+            }
+          })
+          .catch(function() {
+            testMsg.textContent = "Backend not reachable. From project root run run-website.ps1 or uvicorn backend.main:app --port 8000";
+            testMsg.style.color = "#f87171";
+          })
+          .then(function() { testBtn.disabled = false; });
+      });
+    })();
+  </script>
+</body>
+</html>

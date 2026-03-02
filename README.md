@@ -27,6 +27,12 @@ The system replaces manual inspection workflows that traditionally cost **USD 50
 
 > ⚠️ All findings must be verified by a certified marine surveyor before operational decisions are made. This system is advisory in nature.
 
+**Run the website (local or deploy):** See **[DEPLOY.md](DEPLOY.md)** — run locally with `.\run-website.ps1`, deploy to **AWS** with [DEPLOY-AWS.md](DEPLOY-AWS.md), or deploy to **Google Cloud** with `.\deploy-gcp.ps1 -ProjectId YOUR_PROJECT_ID` ([DEPLOY-GCP.md](DEPLOY-GCP.md)). **Before go-live:** see [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md) so every link, button, and icon works in production.
+
+**Marketing site:** Minimal landing page (About, Contact, Demo gate) in [website/](website/). Run `.\run-website.ps1` or `START-WEBSITE.cmd` → http://localhost:8080. Deploy: `./deploy-website-aws.sh` (set `NAUTICAI_WEBSITE_BUCKET`).
+
+**WhatsApp alerts & PDF to WhatsApp:** Require [Twilio](https://www.twilio.com). See **[WHATSAPP_SETUP.md](WHATSAPP_SETUP.md)** to enable "Send test alert", completion alerts, and "Send PDF to WhatsApp".
+
 ---
 
 ## Key Capabilities
@@ -195,27 +201,43 @@ nauticai-maritime/
 
 ---
 
-## Installation
+
+## Quick Inference — No Training Required
 
 ### Prerequisites
 - Python 3.9+
 - pip
 
-### Local Setup
+### Step-by-Step Usage
 
-```bash
-# 1. Clone repository
-git clone https://github.com/aishwaryaV25/nauticAI-maritime.git
-cd nauticAI-maritime
+1. **Clone the repository**
+	```bash
+	git clone https://github.com/aishwaryaV25/nauticAI-maritime.git
+	cd nauticAI-maritime
+	```
 
-# 2. Install dependencies
-pip install -r requirements.txt
+2. **Install dependencies**
+	```bash
+	pip install -r requirements.txt
+	```
 
-# 3. Run application
-streamlit run app/streamlit_app.py
-```
+3. **Place your image in the project folder**
+	(e.g., `test_image.jpg`)
 
-The model weights (`best.pt`, 20MB) are automatically downloaded from Hugging Face on first run.
+4. **Run inference (no training needed!)**
+	```bash
+	python predict.py test_image.jpg
+	```
+	- Outputs: `test_image_annotated.jpg` (annotated image), `test_image_detections.json` (detection results)
+
+> The model weights (`best.pt`) are already included in `weights/`. No dataset or retraining required.
+
+---
+
+## Installation
+
+### Prerequisites
+...existing code...
 
 ---
 

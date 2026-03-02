@@ -57,12 +57,11 @@ BACKEND_URL=$(gcloud run services describe "${BACKEND_SERVICE}" \
 echo "Backend deployed at: ${BACKEND_URL}"
 
 # ── Step 4: Build frontend with backend URL baked in ──────────────────
-echo "[4/6] Building frontend Docker image..."
+echo "[4/6] Building frontend Docker image (API URL: ${BACKEND_URL})..."
 gcloud builds submit \
-  --tag "${FRONTEND_IMAGE}" \
+  --config=cloudbuild-frontend.yaml \
+  --substitutions="_REACT_APP_API_URL=${BACKEND_URL},_FRONTEND_IMAGE=${FRONTEND_IMAGE}" \
   --timeout=600 \
-  -f Dockerfile.frontend \
-  --substitutions="_REACT_APP_API_URL=${BACKEND_URL}" \
   .
 
 # ── Step 5: Deploy frontend to Cloud Run ──────────────────────────────

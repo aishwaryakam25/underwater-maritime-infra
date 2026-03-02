@@ -16,8 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
 COPY app/pdf_report.py ./app/pdf_report.py
 
-# Copy model if present (else it will auto-download from HuggingFace)
-COPY best.pt* ./
+# Optional: copy weights/best.pt into repo and uncomment next line to bake model into image
+# COPY weights/best.pt ./
 
 ENV PORT=8000
 EXPOSE 8000

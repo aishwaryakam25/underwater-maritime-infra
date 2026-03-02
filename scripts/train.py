@@ -6,7 +6,11 @@ GPU: NVIDIA RTX 3050 Ti
 """
 from ultralytics import YOLO
 
+import torch
 model = YOLO("yolov8s.pt")  # auto-downloads on first run
+
+# Use GPU if available, else CPU
+device = 0 if torch.cuda.is_available() else "cpu"
 
 results = model.train(
     data="data/merged/data.yaml",
@@ -35,7 +39,7 @@ results = model.train(
     name="nauticai_v1",
     exist_ok=True,
     patience=20,
-    device=0,           # RTX 3050 Ti GPU ✅
+    device=device,
 )
 
 print("✅ Training complete!")

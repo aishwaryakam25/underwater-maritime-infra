@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NautiCAI — Underwater AI Inspection | Defect Detection in Seconds</title>
+  <meta name="description" content="Production-grade AI for subsea defect detection. Inspect pipelines, hulls, and cables in seconds. 94% precision · 19 classes · No training required." />
+  <meta property="og:title" content="NautiCAI — Underwater AI Inspection" />
+  <meta property="og:description" content="AI-powered subsea defect detection. Replace USD 500K+ surveys with automated analysis in seconds." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect fill='%230a0e1a' width='32' height='32'/><circle cx='16' cy='14' r='6' fill='%2322d3ee' opacity='0.9'/></svg>" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body data-app-url="/app/" data-api-url="">
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <div class="alert-bar" id="alert-bar" role="alert">
+    <span class="alert-bar-pulse"></span>
+    <span class="alert-bar-dot"></span>
+    <span class="alert-bar-text"><strong>New:</strong> Video PDF reports — ROV to report in one click.</span>
+    <span class="alert-bar-urgent">Limited demo slots</span>
+    <a href="#contact" class="alert-bar-cta">Book a demo →</a>
+    <button type="button" class="alert-bar-dismiss" id="alert-dismiss" aria-label="Dismiss">×</button>
+  </div>
+
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+  <header class="nav" role="banner">
+    <a href="index.html" class="nav-logo" aria-label="NautiCAI home">NAUTICAI</a>
+    <nav class="nav-links" aria-label="Main">
+      <span class="nav-status" title="Platform status">
+        <span class="nav-status-dot"></span>
+        Live
+      </span>
+      <a href="#how">How it works</a>
+      <a href="#use-cases">Use cases</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+      <a href="#" class="nav-cta demo-link">Try demo</a>
+    </nav>
+  </header>
+
+  <main id="main" role="main">
+    <!-- Hero — video bg + 3D maritime elements -->
+    <section class="hero reveal" aria-labelledby="hero-title">
+      <div class="hero-video-wrap" aria-hidden="true">
+        <video class="hero-video" autoplay muted loop playsinline poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 1080'%3E%3Crect fill='%23070b14' width='1920' height='1080'/%3E%3C/svg%3E">
+          <source src="https://cdn.mixkit.co/videos/preview/mixkit-underwater-view-of-the-ocean-1228-large.mp4" type="video/mp4" />
+          <source src="https://assets.mixkit.co/videos/preview/mixkit-underwater-view-of-the-ocean-1228-large.mp4" type="video/mp4" />
+        </video>
+        <div class="hero-video-overlay"></div>
+      </div>
+      <div class="hero-bg" aria-hidden="true">
+        <span class="hero-glow"></span>
+        <span class="sonar-ring r1"></span>
+        <span class="sonar-ring r2"></span>
+        <span class="sonar-ring r3"></span>
+      </div>
+      <div class="hero-3d hero-3d--sub" aria-hidden="true">
+        <svg class="hero-3d-svg" viewBox="0 0 120 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <ellipse cx="60" cy="20" rx="52" ry="14" stroke="currentColor" stroke-width="1.2" opacity="0.35"/>
+          <path d="M 18 20 L 102 20" stroke="currentColor" stroke-width="0.8" opacity="0.25"/>
+          <ellipse cx="88" cy="20" rx="8" ry="6" stroke="currentColor" stroke-width="1" opacity="0.4"/>
+          <circle cx="28" cy="14" r="4" stroke="currentColor" stroke-width="1" opacity="0.3"/>
+        </svg>
+      </div>
+      <div class="hero-3d hero-3d--ship" aria-hidden="true">
+        <svg class="hero-3d-svg" viewBox="0 0 140 50" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 10 32 L 50 32 L 55 28 L 95 28 L 130 32 L 130 36 L 10 36 Z" stroke="currentColor" stroke-width="1" opacity="0.3"/>
+          <rect x="58" y="18" width="24" height="14" rx="1" stroke="currentColor" stroke-width="0.9" opacity="0.35"/>
+          <path d="M 20 32 L 20 22 L 24 22 L 24 32" stroke="currentColor" stroke-width="0.8" opacity="0.25"/>
+        </svg>
+      </div>
+      <div class="hero-inner">
+        <div class="hero-content">
+          <p class="hero-eyebrow">Underwater AI · No training required</p>
+          <h1 id="hero-title" class="hero-title">
+            <span class="hero-title-line">Detect subsea defects.</span>
+            <span class="hero-title-line hero-title-accent">In seconds.</span>
+          </h1>
+          <p class="hero-sub">Replace <strong>USD 500K+</strong> manual surveys with automated inspection. Pipelines, hulls, cables — one platform.</p>
+          <div class="hero-stats" role="list">
+            <span class="hero-stat" role="listitem"><em>94%</em> precision</span>
+            <span class="hero-stat" role="listitem"><em>19</em> classes</span>
+            <span class="hero-stat" role="listitem"><em>&lt;30s</em> report</span>
+          </div>
+          <div class="hero-btns">
+            <a href="#contact" class="btn btn-primary btn-glow">Get in touch</a>
+            <a href="#" class="btn btn-ghost demo-link">Try demo</a>
+          </div>
+        </div>
+        <div class="hero-mockup" aria-hidden="true">
+          <div class="mockup-window">
+            <div class="mockup-bar">
+              <span class="mockup-dot"></span>
+              <span class="mockup-dot"></span>
+              <span class="mockup-dot"></span>
+              <span class="mockup-title">NautiCAI — Inspection</span>
+            </div>
+            <div class="mockup-body">
+              <div class="mockup-sonar">
+                <span class="mockup-ring"></span>
+                <span class="mockup-ring"></span>
+                <span class="mockup-ring"></span>
+                <div class="mockup-center"></div>
+              </div>
+              <div class="mockup-label">Detection active</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- One-liner — professional maritime positioning -->
+    <section class="oneliner reveal" aria-hidden="true">
+      <p class="oneliner-text">Subsea inspection for pipelines, hulls, and cables — built for maritime operations.</p>
+      <p class="oneliner-meta">Pipelines · Vessel hulls · Subsea cables · ROV &amp; video</p>
+    </section>
+
+    <!-- Trust strip -->
+    <section class="trust-strip reveal" aria-label="Key metrics">
+      <div class="trust-inner">
+        <div class="trust-item">
+          <span class="trust-value">94.2%</span>
+          <span class="trust-label">Precision</span>
+        </div>
+        <div class="trust-item">
+          <span class="trust-value">19</span>
+          <span class="trust-label">Defect classes</span>
+        </div>
+        <div class="trust-item">
+          <span class="trust-value">15K+</span>
+          <span class="trust-label">Training images</span>
+        </div>
+        <div class="trust-item">
+          <span class="trust-value">&lt;30s</span>
+          <span class="trust-label">To full report</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- Value props — bento grid -->
+    <section class="value-props reveal" id="how" aria-labelledby="pipeline-title">
+      <p class="section-label">How it works</p>
+      <h2 id="pipeline-title" class="section-title">Inspect with vision. Decide with precision.</h2>
+      <div class="props-grid props-grid--bento">
+        <article class="prop prop-large">
+          <span class="prop-badge">New</span>
+          <h3>Instant analysis</h3>
+          <p>Upload image or ROV footage. Get annotated results, risk scores, and PDF reports in seconds. No training, no tuning.</p>
+        </article>
+        <article class="prop">
+          <h3>Find defects</h3>
+          <p>Corrosion, cracks, marine growth, weld defects — 19 classes across hulls, pipelines, and cables.</p>
+        </article>
+        <article class="prop">
+          <h3>At scale</h3>
+          <p>Single images to full fleet inspections. Edge deployment on Jetson Orin for real-time feeds.</p>
+        </article>
+        <article class="prop">
+          <h3>No training</h3>
+          <p>Pre-trained on 15K+ underwater images. Deploy and run — no custom data or model training.</p>
+        </article>
+      </div>
+    </section>
+
+    <div class="section-divider section-divider--angle"></div>
+
+    <!-- Use cases -->
+    <section class="use-cases reveal" id="use-cases" aria-labelledby="use-cases-title">
+      <p class="section-label">Use cases</p>
+      <h2 id="use-cases-title" class="section-title">Built for the full subsea stack</h2>
+      <div class="use-cases-grid">
+        <div class="use-case">
+          <span class="use-case-icon" aria-hidden="true">🔧</span>
+          <h3>Pipelines</h3>
+          <p>Corrosion, coating failure, free-spans, weld defects. Pipeline integrity in seconds.</p>
+        </div>
+        <div class="use-case">
+          <span class="use-case-icon" aria-hidden="true">🚢</span>
+          <h3>Hulls & structures</h3>
+          <p>Biofouling, marine growth, hull defects. Vessel and port structure inspection.</p>
+        </div>
+        <div class="use-case">
+          <span class="use-case-icon" aria-hidden="true">⚡</span>
+          <h3>Subsea cables</h3>
+          <p>Fracture, deformation, foreign object. Cable health and anomaly detection.</p>
+        </div>
+        <div class="use-case">
+          <span class="use-case-icon" aria-hidden="true">🎬</span>
+          <h3>ROV & video</h3>
+          <p>Frame-by-frame analysis, best-frame selection, video PDF reports.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works (steps) -->
+    <section class="how reveal" id="how-steps" aria-labelledby="steps-title">
+      <p class="section-label">Pipeline</p>
+      <h2 id="steps-title" class="section-title">From footage to report</h2>
+      <div class="how-steps">
+        <article class="step">
+          <span class="step-num">01</span>
+          <h3>Visibility enhancement</h3>
+          <p>CLAHE, green-water filter, turbidity correction — see clearly in murky water.</p>
+        </article>
+        <article class="step">
+          <span class="step-num">02</span>
+          <h3>AI detection</h3>
+          <p>YOLOv8s trained on 15K+ subsea images. 94% precision, 89% recall.</p>
+        </article>
+        <article class="step">
+          <span class="step-num">03</span>
+          <h3>Risk & report</h3>
+          <p>Risk score (0–100), grade A–D, annotated images, heatmaps, and PDF inspection packs.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- CTA band -->
+    <section class="cta-band reveal" aria-labelledby="cta-title">
+      <div class="cta-band-inner">
+        <h2 id="cta-title" class="cta-band-title">Ready to inspect smarter?</h2>
+        <p class="cta-band-sub">Book a demo and see NautiCAI on your own footage.</p>
+        <div class="cta-band-btns">
+          <a href="#contact" class="btn btn-primary btn-glow">Book a demo</a>
+          <a href="#" class="btn btn-ghost demo-link">Try demo now</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- About -->
+    <section class="about reveal" id="about" aria-labelledby="about-title">
+      <p class="section-label">About</p>
+      <h2 id="about-title" class="section-title">Built for maritime operations</h2>
+      <p class="about-body">NautiCAI is a production-grade AI inspection system for underwater infrastructure — subsea pipelines, cables, vessel hulls, and port structures. We replace manual workflows that traditionally cost USD 500,000+ per survey and take days, delivering equivalent analysis in seconds.</p>
+      <p class="about-body">Singapore Maritime AI Systems · Est. 2024</p>
+    </section>
+
+    <!-- Contact -->
+    <section class="contact reveal" id="contact" aria-labelledby="contact-title">
+      <p class="section-label">Contact</p>
+      <h2 id="contact-title" class="section-title">Get in touch</h2>
+      <p class="contact-sub">Book a demo or reach out about inspections, partnerships, or integrations.</p>
+      <form class="contact-form" id="contact-form" data-mailto="contact@nauticai-ai.com">
+        <div class="form-row">
+          <input type="text" name="name" placeholder="Name" required aria-label="Your name" />
+          <input type="email" name="email" placeholder="Email" required aria-label="Your email" />
+        </div>
+        <input type="text" name="company" placeholder="Company (optional)" aria-label="Company" />
+        <textarea name="message" placeholder="Message" rows="4" required aria-label="Message"></textarea>
+        <button type="submit" class="btn btn-primary btn-glow">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <footer class="footer" role="contentinfo">
+    <div class="footer-tech" aria-label="Technology">
+      <span class="footer-tech-label">Powered by</span>
+      <span class="footer-tech-item">YOLOv8</span>
+      <span class="footer-tech-dot">·</span>
+      <span class="footer-tech-item">FastAPI</span>
+      <span class="footer-tech-dot">·</span>
+      <span class="footer-tech-item">React</span>
+      <span class="footer-tech-dot">·</span>
+      <span class="footer-tech-item">Subsea AI</span>
+      <span class="footer-tech-dot">·</span>
+      <span class="footer-tech-item">WhatsApp Alerts</span>
+    </div>
+    <div class="footer-inner">
+      <a href="index.html" class="footer-logo" aria-label="NautiCAI">NAUTICAI</a>
+      <p class="footer-tagline">Explore safer seas.</p>
+      <p class="footer-api-status" id="api-status" aria-live="polite"></p>
+      <p class="footer-copy">© 2025 NautiCAI Pte Ltd · Singapore</p>
+    </div>
+  </footer>
+
+  <a href="#contact" class="float-cta" id="float-cta" aria-label="Book a demo">
+    <span class="float-cta-ring"></span>
+    <span class="float-cta-text">Book demo</span>
+  </a>
+
+  <script src="script.js"></script>
+</body>
+</html>

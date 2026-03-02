@@ -55,8 +55,19 @@ $RECYCLE.BIN/
 .ipynb_checkpoints/
 *.ipynb
 
+# ─── Backend signups / secrets ────────────────────────────────────
+backend/signups.json
+.env
+backend/.env
+
 # ─── Logs / Temp ─────────────────────────────────────────────────
 *.log
 *.tmp
 *.bak
 *.pid
+
+# ─── Node.js ─────────────────────────────────────────────────────
+node_modules/
+.cache/
+frontend/node_modules/
+frontend/.cache/
