@@ -38,6 +38,10 @@ merged_dataset_v2.zip
 *.swo
 *~
 .project
+ 
+# ─── Large Archives / Zips ──────────────────────────────────────
+archive.zip
+*.zip
 .classpath
 .settings/
 
