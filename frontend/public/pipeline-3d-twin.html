@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>NautiCAI 3D Pipeline Digital Twin</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #060d1a; font-family: 'Segoe UI', monospace; overflow: hidden; color: white; }
+
+#header {
+  padding: 12px 20px;
+  background: linear-gradient(90deg, #060d1a, #0a1628);
+  border-bottom: 1px solid #0d2a4a;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+}
+#header .logo { color: #00ccff; font-size: 18px; font-weight: bold; }
+#header .sub { color: #4488aa; font-size: 10px; margin-top: 2px; }
+
+.stat-bar { display: flex; gap: 24px; }
+.stat { text-align: center; }
+.stat .val { font-size: 20px; font-weight: bold; }
+.stat .lbl { color: #556677; font-size: 9px; text-transform: uppercase; }
+
+#main { display: flex; height: calc(100vh - 52px); }
+#viewport { flex: 1; position: relative; }
+canvas { display: block; width: 100%; height: 100%; }
+
+#upload-zone {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,20,40,0.9);
+  border: 2px dashed #0d4a7a;
+  border-radius: 12px;
+  padding: 30px 40px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  z-index: 5;
+}
+#upload-zone:hover { border-color: #00ccff; background: rgba(0,30,60,0.95); }
+#upload-zone h3 { color: #00ccff; margin-bottom: 8px; }
+#upload-zone p { color: #4488aa; font-size: 12px; }
+#upload-zone input { display: none; }
+#upload-btn {
+  margin-top: 14px; padding: 8px 24px;
+  background: #00ccff22; border: 1px solid #00ccff;
+  color: #00ccff; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+#upload-btn:hover { background: #00ccff44; }
+
+#hint {
+  position: absolute; bottom: 12px; left: 50%;
+  transform: translateX(-50%);
+  color: #334455; font-size: 11px; pointer-events: none;
+}
+
+#panel {
+  width: 240px; background: #080f1e;
+  border-left: 1px solid #0d2a4a;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.panel-section { padding: 12px; border-bottom: 1px solid #0d2a4a; }
+.panel-title { color: #00ccff; font-size: 10px; font-weight: bold; letter-spacing: 1px; margin-bottom: 10px; }
+
+#defect-list { flex: 1; overflow-y: auto; padding: 8px; }
+#defect-list::-webkit-scrollbar { width: 4px; }
+#defect-list::-webkit-scrollbar-thumb { background: #0d2a4a; }
+
+.defect-card {
+  margin-bottom: 8px; padding: 8px 10px;
+  background: #0a1520; border-radius: 6px;
+  border-left: 3px solid #333;
+  cursor: pointer; transition: all 0.2s;
+}
+.defect-card:hover { background: #0d1e30; transform: translateX(2px); }
+.defect-card .dc-name { font-size: 11px; font-weight: bold; }
+.defect-card .dc-info { color: #5577aa; font-size: 10px; margin-top: 2px; }
+
+.legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.legend-label { color: #5577aa; font-size: 10px; }
+
+#health-bar-bg { background: #0d2a4a; border-radius: 4px; height: 6px; margin: 6px 0; }
+#health-bar-fill { height: 100%; border-radius: 4px; transition: width 1s; }
+#health-label { font-size: 11px; }
+
+#controls { padding: 10px 12px; border-top: 1px solid #0d2a4a; }
+.ctrl-btn {
+  width: 100%; padding: 7px; margin-bottom: 6px;
+  background: #0a1828; border: 1px solid #0d3a5a;
+  color: #00ccff; border-radius: 5px;
+  cursor: pointer; font-size: 11px; transition: all 0.2s;
+}
+.ctrl-btn:hover { background: #0d2a4a; }
+.ctrl-btn.active { background: #00ccff22; border-color: #00ccff; }
+
+#loading {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center; display: none; z-index: 6;
+}
+#loading .spinner {
+  width: 40px; height: 40px;
+  border: 3px solid #0d2a4a; border-top-color: #00ccff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading p { color: #00ccff; font-size: 13px; }
+
+#api-status {
+  position: absolute; top: 10px; left: 10px;
+  font-size: 10px; padding: 4px 10px;
+  border-radius: 4px; z-index: 5;
+}
+.status-live { background: #00cc4422; border: 1px solid #00cc44; color: #00cc44; }
+.status-demo { background: #ffaa0022; border: 1px solid #ffaa00; color: #ffaa00; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <div class="logo">🌊 NautiCAI — 3D Pipeline Digital Twin</div>
+    <div class="sub">Subsea Pipeline Inspection • Real-time Defect Mapping • YOLOv8 Powered</div>
+  </div>
+  <div class="stat-bar">
+    <div class="stat"><div class="val" id="s-total" style="color:#00ccff">0</div><div class="lbl">Defects</div></div>
+    <div class="stat"><div class="val" id="s-crit"  style="color:#ff2200">0</div><div class="lbl">Critical</div></div>
+    <div class="stat"><div class="val" id="s-mod"   style="color:#ffaa00">0</div><div class="lbl">Moderate</div></div>
+    <div class="stat"><div class="val" id="s-mild"  style="color:#ffdd00">0</div><div class="lbl">Mild</div></div>
+    <div class="stat"><div class="val" id="s-grade" style="color:#00cc44">—</div><div class="lbl">Grade</div></div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="viewport">
+    <canvas id="c"></canvas>
+    <div id="upload-zone">
+      <h3>🔍 Waiting for Pipeline Scan...</h3>
+      <p>Run a scan in the Pipeline tab<br>or load demo data below</p>
+      <p style="margin-top:10px;font-size:10px;color:#334455">Results will appear here automatically</p>
+    </div>
+    <div id="loading">
+      <div class="spinner"></div>
+      <p>Mapping defects to 3D model...</p>
+    </div>
+    <div id="api-status" class="status-demo">WAITING FOR SCAN</div>
+    <div id="hint">🖱️ Drag to rotate • Scroll to zoom</div>
+  </div>
+
+  <div id="panel">
+    <div class="panel-section">
+      <div class="panel-title">PIPELINE HEALTH</div>
+      <div id="health-bar-bg"><div id="health-bar-fill" style="width:100%;background:#00cc44"></div></div>
+      <div id="health-label" style="color:#00cc44">No inspection loaded</div>
+    </div>
+
+    <div class="panel-section">
+      <div class="panel-title">LEGEND</div>
+      <div class="legend-row"><div class="dot" style="background:#ff2200"></div><div class="legend-label">Critical / Severe</div></div>
+      <div class="legend-row"><div class="dot" style="background:#ffaa00"></div><div class="legend-label">Moderate</div></div>
+      <div class="legend-row"><div class="dot" style="background:#ffdd00"></div><div class="legend-label">Mild / Low</div></div>
+      <div class="legend-row"><div class="dot" style="background:#00cc44"></div><div class="legend-label">Clean</div></div>
+    </div>
+
+    <div class="panel-title" style="padding:10px 12px 4px">DEFECT LOG</div>
+    <div id="defect-list">
+      <div style="color:#334455;font-size:11px;padding:8px">Run a pipeline scan to see defects</div>
+    </div>
+
+    <div id="controls">
+      <button class="ctrl-btn active" id="btn-rotate" onclick="toggleRotate()">⏸ Pause Rotation</button>
+      <button class="ctrl-btn" onclick="loadDemo()">🎭 Load Demo Data</button>
+      <button class="ctrl-btn" onclick="resetView()">🔄 Reset View</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── Three.js Setup ──────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const wrap   = document.getElementById('viewport');
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setClearColor(0x060d1a);
+renderer.shadowMap.enabled = true;
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+camera.position.set(0, 2, 8);
+camera.lookAt(0, 0, 0);
+
+function resize() {
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+resize();
+window.addEventListener('resize', resize);
+
+// Lights
+scene.add(new THREE.AmbientLight(0x223344, 2));
+const dir = new THREE.DirectionalLight(0xffffff, 2);
+dir.position.set(5, 8, 5); scene.add(dir);
+const pt1 = new THREE.PointLight(0x0088ff, 1.5, 30);
+pt1.position.set(-5, 3, 3); scene.add(pt1);
+const pt2 = new THREE.PointLight(0x00ffcc, 0.8, 20);
+pt2.position.set(5, -2, -3); scene.add(pt2);
+
+// ── Pipeline ────────────────────────────────────────────────────────────
+const pipeGroup = new THREE.Group();
+scene.add(pipeGroup);
+
+function buildPipeline() {
+  const pipe = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.55, 8, 64, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0x1a3a5c, metalness: 0.85, roughness: 0.25, side: THREE.DoubleSide, transparent: true, opacity: 0.82 })
+  );
+  pipe.rotation.z = Math.PI / 2;
+  pipeGroup.add(pipe);
+
+  [-4, 4].forEach(x => {
+    const cap = new THREE.Mesh(
+      new THREE.CircleGeometry(0.55, 32),
+      new THREE.MeshStandardMaterial({ color: 0x1a3a5c, metalness: 0.85 })
+    );
+    cap.position.x = x;
+    cap.rotation.y = x > 0 ? 0 : Math.PI;
+    pipeGroup.add(cap);
+  });
+
+  [-3, -1.5, 0, 1.5, 3].forEach(x => {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.58, 0.055, 8, 32),
+      new THREE.MeshStandardMaterial({ color: 0x2255aa, metalness: 0.9, roughness: 0.2 })
+    );
+    ring.position.x = x;
+    ring.rotation.y = Math.PI / 2;
+    pipeGroup.add(ring);
+  });
+
+  for (let i = 0; i < 3; i++) {
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.553, 0.553, 8, 32, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x1144aa, wireframe: true, transparent: true, opacity: 0.05 })
+    );
+    mesh.rotation.z = Math.PI / 2;
+    pipeGroup.add(mesh);
+  }
+}
+buildPipeline();
+
+// Grid + particles
+const grid = new THREE.GridHelper(20, 20, 0x0d1a2a, 0x0d1a2a);
+grid.position.y = -2;
+scene.add(grid);
+
+const pGeo = new THREE.BufferGeometry();
+const pPos = [];
+for (let i = 0; i < 300; i++) pPos.push((Math.random()-.5)*20, (Math.random()-.5)*10, (Math.random()-.5)*10);
+pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pPos, 3));
+scene.add(new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x1a3a5c, size: 0.04 })));
+
+// ── Defect Markers ──────────────────────────────────────────────────────
+const defectMeshes = [];
+const SEV_COLOR = { Critical:0xff2200, High:0xff5500, Moderate:0xffaa00, Medium:0xffaa00, Low:0xffdd00, Mild:0xffdd00 };
+
+function clearDefects() {
+  defectMeshes.forEach(m => pipeGroup.remove(m));
+  defectMeshes.length = 0;
+}
+
+function addDefects(defects) {
+  clearDefects();
+  defects.forEach(d => {
+    const color = SEV_COLOR[d.severity] || 0x00ccff;
+    const size  = (d.severity === 'Critical' || d.severity === 'High') ? 0.13 :
+                  (d.severity === 'Medium'   || d.severity === 'Moderate') ? 0.10 : 0.08;
+    const r = 0.62;
+    const x = (d.pipeline_pos / 100) * 8 - 4;
+    const y = Math.sin(d.angle) * r;
+    const z = Math.cos(d.angle) * r;
+
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(size, 16, 16),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.7 })
+    );
+    sphere.position.set(x, y, z);
+    sphere.userData = d;
+    pipeGroup.add(sphere);
+    defectMeshes.push(sphere);
+
+    const pulse = new THREE.Mesh(
+      new THREE.RingGeometry(size + 0.02, size + 0.06, 16),
+      new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.5 })
+    );
+    pulse.position.set(x, y, z);
+    pulse.lookAt(x * 3, y * 3, z * 3);
+    pulse.userData = { isPulse: true };
+    pipeGroup.add(pulse);
+    defectMeshes.push(pulse);
+  });
+}
+
+// ── UI Updates ──────────────────────────────────────────────────────────
+function updateStats(data) {
+  document.getElementById('s-total').textContent = data.total_defects || 0;
+  const sev = {};
+  (data.defects_3d || []).forEach(d => { sev[d.severity] = (sev[d.severity] || 0) + 1; });
+  document.getElementById('s-crit').textContent  = (sev.Critical || 0) + (sev.High || 0);
+  document.getElementById('s-mod').textContent   = (sev.Moderate || 0) + (sev.Medium || 0);
+  document.getElementById('s-mild').textContent  = (sev.Low || 0) + (sev.Mild || 0);
+  document.getElementById('s-grade').textContent = data.grade || '—';
+
+  const risk  = data.risk_score || 0;
+  const pct   = Math.max(0, 100 - risk);
+  const color = pct > 70 ? '#00cc44' : pct > 40 ? '#ffaa00' : '#ff2200';
+  document.getElementById('health-bar-fill').style.width      = pct + '%';
+  document.getElementById('health-bar-fill').style.background = color;
+  document.getElementById('health-label').style.color         = color;
+  document.getElementById('health-label').textContent =
+    pct > 70 ? pct.toFixed(0) + '% — Good Condition' :
+    pct > 40 ? pct.toFixed(0) + '% — Attention Required' :
+               pct.toFixed(0) + '% — Critical — Act Now';
+}
+
+function updateDefectList(defects) {
+  const list = document.getElementById('defect-list');
+  if (!defects || defects.length === 0) {
+    list.innerHTML = '<div style="color:#334455;font-size:11px;padding:8px">No defects detected</div>';
+    return;
+  }
+  const colors = { Critical:'#ff2200', High:'#ff5500', Moderate:'#ffaa00', Medium:'#ffaa00', Low:'#ffdd00', Mild:'#ffdd00' };
+  list.innerHTML = defects.map(d => `
+    <div class="defect-card" style="border-left-color:${colors[d.severity] || '#00ccff'}">
+      <div class="dc-name" style="color:${colors[d.severity] || '#00ccff'}">${d.cls}</div>
+      <div class="dc-info">Pos: ${d.pipeline_pos}m | ${d.severity} | ${(d.conf * 100).toFixed(0)}%</div>
+    </div>
+  `).join('');
+}
+
+// ── Receive detections from Pipeline tab in React ───────────────────────
+window.addEventListener('message', (e) => {
+  if (!e.data || e.data.type !== 'NAUTICAI_DETECTIONS') return;
+  const data = e.data.data;
+  document.getElementById('upload-zone').style.display  = 'none';
+  document.getElementById('loading').style.display      = 'block';
+  setTimeout(() => {
+    document.getElementById('loading').style.display    = 'none';
+    document.getElementById('api-status').className     = 'status-live';
+    document.getElementById('api-status').textContent   = 'LIVE — NautiCAI Pipeline Scan';
+    addDefects(data.defects_3d || []);
+    updateStats(data);
+    updateDefectList(data.defects_3d || []);
+  }, 600);
+});
+
+// ── Load Demo Data ──────────────────────────────────────────────────────
+function loadDemo() {
+  document.getElementById('upload-zone').style.display = 'none';
+  document.getElementById('api-status').className      = 'status-demo';
+  document.getElementById('api-status').textContent    = 'DEMO MODE';
+  const demo = {
+    total_defects: 8, risk_score: 62, grade: 'C',
+    defects_3d: [
+      { id:1, cls:'Corrosion',       severity:'Critical', conf:0.94, pipeline_pos:12, angle:0.5 },
+      { id:2, cls:'Crack',           severity:'Critical', conf:0.91, pipeline_pos:22, angle:1.8 },
+      { id:3, cls:'Marine Growth',   severity:'Medium',   conf:0.87, pipeline_pos:35, angle:3.2 },
+      { id:4, cls:'Biofouling',      severity:'Moderate', conf:0.82, pipeline_pos:48, angle:0.9 },
+      { id:5, cls:'Coating Damage',  severity:'Low',      conf:0.78, pipeline_pos:58, angle:2.5 },
+      { id:6, cls:'Anode Depletion', severity:'High',     conf:0.89, pipeline_pos:67, angle:4.1 },
+      { id:7, cls:'Dent',            severity:'Medium',   conf:0.76, pipeline_pos:78, angle:1.2 },
+      { id:8, cls:'Corrosion',       severity:'Mild',     conf:0.71, pipeline_pos:88, angle:5.0 },
+    ]
+  };
+  addDefects(demo.defects_3d);
+  updateStats(demo);
+  updateDefectList(demo.defects_3d);
+}
+
+// ── Mouse / Touch Controls ──────────────────────────────────────────────
+let isDragging = false, px = 0, py = 0, autoRotate = true;
+
+canvas.addEventListener('mousedown', e => { isDragging = true; px = e.clientX; py = e.clientY; });
+window.addEventListener('mouseup',   () => { isDragging = false; });
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  pipeGroup.rotation.y += (e.clientX - px) * 0.006;
+  pipeGroup.rotation.x += (e.clientY - py) * 0.004;
+  px = e.clientX; py = e.clientY;
+});
+canvas.addEventListener('wheel', e => {
+  camera.position.z = Math.max(3, Math.min(15, camera.position.z + e.deltaY * 0.01));
+});
+canvas.addEventListener('touchstart', e => { isDragging = true; px = e.touches[0].clientX; py = e.touches[0].clientY; });
+canvas.addEventListener('touchend',   () => { isDragging = false; });
+canvas.addEventListener('touchmove',  e => {
+  if (!isDragging) return;
+  pipeGroup.rotation.y += (e.touches[0].clientX - px) * 0.006;
+  pipeGroup.rotation.x += (e.touches[0].clientY - py) * 0.004;
+  px = e.touches[0].clientX; py = e.touches[0].clientY;
+});
+
+function toggleRotate() {
+  autoRotate = !autoRotate;
+  const btn = document.getElementById('btn-rotate');
+  btn.textContent = autoRotate ? '⏸ Pause Rotation' : '▶ Resume Rotation';
+  btn.className   = autoRotate ? 'ctrl-btn active' : 'ctrl-btn';
+}
+
+function resetView() {
+  pipeGroup.rotation.set(0, 0, 0);
+  camera.position.set(0, 2, 8);
+}
+
+// ── Animation Loop ──────────────────────────────────────────────────────
+let t = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  t += 0.016;
+  if (autoRotate && !isDragging) pipeGroup.rotation.y += 0.004;
+  defectMeshes.forEach(m => {
+    if (m.userData.isPulse) {
+      const s = 1 + Math.sin(t * 3) * 0.3;
+      m.scale.setScalar(s);
+      m.material.opacity = 0.3 + Math.sin(t * 3) * 0.2;
+    }
+  });
+  renderer.render(scene, camera);
+}
+animate();
+
+// Hide upload zone immediately — data comes from Pipeline tab via postMessage
+document.getElementById('upload-zone').style.display = 'none';
+document.getElementById('api-status').textContent    = 'READY — Run a Pipeline Scan';
+</script>
+</body>
+</html>

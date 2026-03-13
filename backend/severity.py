@@ -30,7 +30,12 @@ DEFECT_CLASSES = [
     "Free Span", "No Defect",
 ]
 
-PIPELINE_DEFECTS = ["Corrosion", "Crack", "Coating Failure", "Pitting", "Leakage", "Weld Defect", "Blockage"]
+PIPELINE_DEFECTS = [
+    "Corrosion", "Crack", "Coating Failure", "Pitting", "Leakage", "Weld Defect", "Blockage",
+    "Micro-cracks", "Delamination", "Algae Growth", "Sediment Deposition", "Valve Fault",
+    "Barnacle Infestation", "Structural Fatigue", "Cavitation Damage", "Electrical Cable Damage",
+    "Insulation Loss", "Flooding", "Anchor Impact", "Debris Accumulation", "Fish Nesting", "Oil Stain"
+]
 CABLE_DEFECTS = ["Fracture", "Deformation", "Foreign Object", "Biofouling", "Marine Growth", "Dent"]
 
 

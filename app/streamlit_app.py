@@ -80,7 +80,12 @@ CLASS_REMAP = {
     "healthy": "No Defect",
 }
 SEV_COLORS = {"Critical":(220,50,50),"High":(255,165,0),"Medium":(0,180,255),"Low":(0,220,130)}
-PIPELINE_DEFECTS = ["Corrosion","Crack","Coating Failure","Pitting","Leakage","Weld Defect","Blockage"]
+PIPELINE_DEFECTS = [
+  "Corrosion","Crack","Coating Failure","Pitting","Leakage","Weld Defect","Blockage",
+  "Micro-cracks", "Delamination", "Algae Growth", "Sediment Deposition", "Valve Fault",
+  "Barnacle Infestation", "Structural Fatigue", "Cavitation Damage", "Electrical Cable Damage",
+  "Insulation Loss", "Flooding", "Anchor Impact", "Debris Accumulation", "Fish Nesting", "Oil Stain"
+]
 CABLE_DEFECTS    = ["Fracture","Deformation","Foreign Object","Biofouling","Marine Growth","Dent"]
 
 st.set_page_config(

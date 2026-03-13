@@ -26,7 +26,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from severity import compute_risk, score_to_grade
 from visibility import full_enhance, pil_to_cv, cv_to_pil, apply_clahe, apply_green_water, apply_turbidity, apply_edge_estimator
-from detection import run_detection, annotate_image, build_heatmap, get_model_name, load_yolo
+from detection import (
+    run_detection, annotate_image, build_heatmap, get_model_name, load_yolo,
+    AVAILABLE_MODELS, MODEL_DESCRIPTIONS, set_active_model, get_active_model_key
+)
 
 # Also make app/pdf_report.py importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
@@ -35,7 +38,7 @@ from pdf_report import build_pdf
 app = FastAPI(
     title="NautiCAI API",
     description="Underwater Infrastructure Inspection Copilot — API",
-    version="1.0.4",
+    version="1.0.5",
 )
 
 # Allow React dev server and deployed frontend
@@ -48,13 +51,12 @@ app.add_middleware(
 )
 
 
-# ── In-memory stores for demo (signups, one-time PDF links) ─────────────
+# ── In-memory stores ──────────────────────────────────────────────────────
 _signups_file = Path(__file__).resolve().parent / "signups.json"
 _report_downloads = {}  # report_id -> (pdf_bytes, created_at, download_password or None)
 
 
 def _encrypt_pdf(pdf_bytes: bytes, user_password: str) -> bytes:
-    """Encrypt PDF with user password so only recipients with the password can open it."""
     try:
         from pypdf import PdfReader, PdfWriter
         reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -78,12 +80,11 @@ def _store_signup(data: dict):
         pass
 
 def _send_whatsapp(to: str, body: str, media_url: str = None) -> dict:
-    """Send WhatsApp message via Twilio if configured. Returns {sent: bool, message: str}."""
     sid = os.environ.get("TWILIO_ACCOUNT_SID")
     token = os.environ.get("TWILIO_AUTH_TOKEN")
-    from_num = os.environ.get("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")  # Twilio sandbox
+    from_num = os.environ.get("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
     if not sid or not token:
-        return {"sent": False, "message": "WhatsApp not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM."}
+        return {"sent": False, "message": "WhatsApp not configured."}
     try:
         try:
             from twilio.rest import Client
@@ -100,32 +101,58 @@ def _send_whatsapp(to: str, body: str, media_url: str = None) -> dict:
         return {"sent": False, "message": str(e)}
 
 
-# ── Startup: pre-load model ─────────────────────────────────────────────
+# ── Startup ───────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
     load_yolo()
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────
 def _pil_to_b64(img: Image.Image, fmt="PNG") -> str:
     buf = io.BytesIO()
     img.save(buf, format=fmt)
     return base64.b64encode(buf.getvalue()).decode()
 
-
 def _read_upload(file: UploadFile) -> Image.Image:
     return Image.open(io.BytesIO(file.file.read())).convert("RGB")
-
 
 def _b64_to_pil(b64: str) -> Image.Image:
     return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
 
 
-# ── Routes ───────────────────────────────────────────────────────────────
+# ── Model Management ──────────────────────────────────────────────────────
+@app.get("/api/models")
+async def list_models():
+    """List all available models."""
+    return {
+        "active": get_active_model_key(),
+        "available": {k: MODEL_DESCRIPTIONS.get(k, k) for k in AVAILABLE_MODELS}
+    }
+
+@app.post("/api/models/switch")
+async def switch_model(model_key: str = Form(...)):
+    """Switch active detection model."""
+    if model_key not in AVAILABLE_MODELS:
+        return JSONResponse({"error": f"Model {model_key} not found"}, status_code=404)
+    set_active_model(model_key)
+    load_yolo()
+    return {
+        "ok": True,
+        "active_model": model_key,
+        "description": MODEL_DESCRIPTIONS.get(model_key, "")
+    }
+
+
+# ── Routes ────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():
     model_name = get_model_name()
-    return {"status": "ok", "model": model_name, "version": "1.0.4"}
+    return {
+        "status": "ok",
+        "model": model_name,
+        "active_model": get_active_model_key(),
+        "version": "1.0.5"
+    }
 
 
 @app.post("/api/detect")
@@ -135,7 +162,6 @@ async def detect(
     iou_thr: float = Form(0.45),
     mode: str = Form("general"),
     sev_filter: str = Form("All Detections"),
-    # Visibility settings
     use_clahe: bool = Form(True),
     clahe_clip: float = Form(3.0),
     use_green: bool = Form(True),
@@ -144,62 +170,59 @@ async def detect(
     corr_turb: bool = Form(True),
     marine_snow: bool = Form(False),
 ):
-    """
-    Run the vision model on an uploaded image.
-    Returns: detections, annotated image (base64), heatmap (base64), metrics.
-    """
-    pil_img = _read_upload(file)
+    import traceback
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("detect-endpoint")
+    try:
+        pil_img = _read_upload(file)
+        enhanced = full_enhance(
+            pil_img,
+            use_clahe=use_clahe,
+            use_green=use_green,
+            turb_in=turbidity_in,
+            corr_turb=corr_turb,
+            use_edge=use_edge,
+            clahe_clip=clahe_clip,
+            marine_snow=marine_snow,
+        )
+        dets = run_detection(enhanced, conf_thr, iou_thr, mode)
+        SEV_RANK = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
+        if sev_filter == "Critical Only":
+            dets = [d for d in dets if d["severity"] == "Critical"]
+        elif sev_filter == "High+":
+            dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 3]
+        elif sev_filter == "Medium+":
+            dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 2]
 
-    # Visibility enhancement
-    enhanced = full_enhance(
-        pil_img,
-        use_clahe=use_clahe,
-        use_green=use_green,
-        turb_in=turbidity_in,
-        corr_turb=corr_turb,
-        use_edge=use_edge,
-        clahe_clip=clahe_clip,
-        marine_snow=marine_snow,
-    )
+        annotated = annotate_image(enhanced, dets)
+        heatmap = build_heatmap(enhanced, dets)
+        risk = compute_risk(dets)
+        grade = score_to_grade(risk)
+        mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
+        scan_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        sev_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+        for d in dets:
+            sev_counts[d.get("severity", "Medium")] += 1
 
-    # Run detection
-    dets = run_detection(enhanced, conf_thr, iou_thr, mode)
-
-    # Severity filter
-    SEV_RANK = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
-    if sev_filter == "Critical Only":
-        dets = [d for d in dets if d["severity"] == "Critical"]
-    elif sev_filter == "High+":
-        dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 3]
-    elif sev_filter == "Medium+":
-        dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 2]
-
-    # Annotate + heatmap
-    annotated = annotate_image(enhanced, dets)
-    heatmap = build_heatmap(enhanced, dets)
-
-    risk = compute_risk(dets)
-    grade = score_to_grade(risk)
-    mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
-    scan_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    sev_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
-    for d in dets:
-        sev_counts[d.get("severity", "Medium")] += 1
-
-    return {
-        "mission_id": mission_id,
-        "scan_time": scan_time,
-        "model": get_model_name(),
-        "detections": dets,
-        "risk_score": risk,
-        "grade": grade,
-        "sev_counts": sev_counts,
-        "total": len(dets),
-        "annotated_b64": _pil_to_b64(annotated),
-        "heatmap_b64": _pil_to_b64(heatmap),
-        "enhanced_b64": _pil_to_b64(enhanced),
-    }
+        return {
+            "mission_id": mission_id,
+            "scan_time": scan_time,
+            "model": get_model_name(),
+            "active_model": get_active_model_key(),
+            "detections": dets,
+            "risk_score": risk,
+            "grade": grade,
+            "sev_counts": sev_counts,
+            "total": len(dets),
+            "annotated_b64": _pil_to_b64(annotated),
+            "heatmap_b64": _pil_to_b64(heatmap),
+            "enhanced_b64": _pil_to_b64(enhanced),
+        }
+    except Exception as e:
+        logger.error("ERROR in /api/detect: %s", e, exc_info=True)
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/api/enhance")
@@ -213,16 +236,13 @@ async def enhance(
     corr_turb: bool = Form(True),
     marine_snow: bool = Form(False),
 ):
-    """Return visibility-enhanced image comparison."""
     pil_img = _read_upload(file)
     bgr = pil_to_cv(pil_img)
-
     clahe_img = cv_to_pil(apply_clahe(bgr))
     green_img = cv_to_pil(apply_green_water(bgr))
     turb_img = cv_to_pil(apply_turbidity(bgr, 0.45))
     edge_img = cv_to_pil(apply_edge_estimator(bgr))
     full_img = full_enhance(pil_img, use_clahe, use_green, turbidity_in, corr_turb, use_edge, clahe_clip, marine_snow)
-
     return {
         "clahe_b64": _pil_to_b64(clahe_img),
         "green_b64": _pil_to_b64(green_img),
@@ -250,12 +270,9 @@ async def generate_pdf(
     marine_snow: bool = Form(False),
     pdf_password: str = Form(""),
 ):
-    """Generate and download a PDF inspection report. Optional pdf_password encrypts the PDF for privacy."""
     pil_img = _read_upload(file)
-
     enhanced = full_enhance(pil_img, use_clahe, use_green, turbidity_in, corr_turb, use_edge, clahe_clip, marine_snow)
     dets = run_detection(enhanced, conf_thr, iou_thr, mode)
-
     SEV_RANK = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
     if sev_filter == "Critical Only":
         dets = [d for d in dets if d["severity"] == "Critical"]
@@ -263,13 +280,11 @@ async def generate_pdf(
         dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 3]
     elif sev_filter == "Medium+":
         dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 2]
-
     annotated = annotate_image(enhanced, dets)
     heatmap = build_heatmap(enhanced, dets)
     risk = compute_risk(dets)
     grade = score_to_grade(risk)
     mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
-
     pdf_bytes = build_pdf(
         mission_id, vessel_name, inspector, mode,
         dets, pil_img, annotated, heatmap,
@@ -277,7 +292,6 @@ async def generate_pdf(
     )
     if (pwd := (pdf_password or "").strip()):
         pdf_bytes = _encrypt_pdf(pdf_bytes, pwd)
-
     filename = f"NautiCAI_Report_{mission_id}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
@@ -300,26 +314,20 @@ async def video_detect(
     turbidity_in: float = Form(0.0),
     corr_turb: bool = Form(True),
 ):
-    """Process a video file frame-by-frame."""
     import cv2
-
-    # Save uploaded video to temp file
     suffix = Path(file.filename or "video.mp4").suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tf:
         tf.write(await file.read())
         tmp_path = tf.name
-
     cap = cv2.VideoCapture(tmp_path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps_v = cap.get(cv2.CAP_PROP_FPS) or 25
     wv = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     hv = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
     all_dets = []
     frame_results = []
     fn = 0
     det_id_offset = 0
-
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -334,7 +342,6 @@ async def video_detect(
                 d["frame"] = fn
             all_dets.extend(df_v)
             af = annotate_image(ef, df_v)
-            # Only keep first 4 annotated frames as base64
             if len(frame_results) < 4:
                 frame_results.append({
                     "frame_num": fn,
@@ -342,16 +349,13 @@ async def video_detect(
                     "annotated_b64": _pil_to_b64(af),
                 })
         fn += 1
-
     cap.release()
     try:
         os.unlink(tmp_path)
     except OSError:
         pass
-
     risk = compute_risk(all_dets)
     grade = score_to_grade(risk)
-
     return {
         "video_info": {
             "total_frames": total,
@@ -362,9 +366,10 @@ async def video_detect(
         "total_detections": len(all_dets),
         "risk_score": risk,
         "grade": grade,
+        "active_model": get_active_model_key(),
         "frames_processed": fn // sample_n + 1,
         "sample_frames": frame_results,
-        "detections": all_dets[:100],  # Limit for response size
+        "detections": all_dets[:100],
     }
 
 
@@ -385,22 +390,16 @@ async def generate_pdf_video(
     corr_turb: bool = Form(True),
     pdf_password: str = Form(""),
 ):
-    """Generate and download a PDF report for video analysis (ROV footage). Optional pdf_password encrypts the PDF."""
     import cv2
-
     suffix = Path(file.filename or "video.mp4").suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tf:
         tf.write(await file.read())
         tmp_path = tf.name
-
     cap = cv2.VideoCapture(tmp_path)
     all_dets = []
-    first_enhanced = None
-    first_annotated = None
-    first_frame_dets = None
+    first_enhanced = first_annotated = first_frame_dets = None
     fn = 0
     det_id_offset = 0
-
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -416,27 +415,21 @@ async def generate_pdf_video(
             all_dets.extend(df_v)
             af = annotate_image(ef, df_v)
             if first_enhanced is None:
-                first_enhanced = ef
-                first_annotated = af
-                first_frame_dets = df_v
+                first_enhanced, first_annotated, first_frame_dets = ef, af, df_v
         fn += 1
-
     cap.release()
     try:
         os.unlink(tmp_path)
     except OSError:
         pass
-
     if first_enhanced is None:
         first_enhanced = Image.new("RGB", (640, 480), (40, 40, 40))
         first_annotated = first_enhanced
         first_frame_dets = []
-
     risk = compute_risk(all_dets)
     grade = score_to_grade(risk)
     mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
     heatmap = build_heatmap(first_enhanced, first_frame_dets)
-
     pdf_bytes = build_pdf(
         mission_id, vessel_name, inspector, "video",
         all_dets, first_enhanced, first_annotated, heatmap,
@@ -444,7 +437,6 @@ async def generate_pdf_video(
     )
     if (pwd := (pdf_password or "").strip()):
         pdf_bytes = _encrypt_pdf(pdf_bytes, pwd)
-
     filename = f"NautiCAI_Video_Report_{mission_id}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
@@ -453,17 +445,15 @@ async def generate_pdf_video(
     )
 
 
-# ── Signup (demo gate) ──────────────────────────────────────────────────
+# ── Signup ────────────────────────────────────────────────────────────────
 class SignupBody(BaseModel):
     name: str
     email: str
     whatsapp: str = ""
     alerts_whatsapp: bool = False
 
-
 @app.post("/api/signup")
 async def signup(body: SignupBody):
-    """Store demo signup; used by demo gate before redirecting to app."""
     _store_signup({
         "name": body.name,
         "email": body.email,
@@ -473,20 +463,17 @@ async def signup(body: SignupBody):
     return {"ok": True, "message": "Signed up. Redirecting to demo…"}
 
 
-# ── WhatsApp: send message (alerts / normal) ─────────────────────────────
+# ── WhatsApp ──────────────────────────────────────────────────────────────
 class WhatsAppSendBody(BaseModel):
-    to: str  # E.164 or whatsapp:+1234567890
+    to: str
     message: str
-
 
 @app.post("/api/whatsapp/send")
 async def whatsapp_send(body: WhatsAppSendBody):
-    """Send a text message to WhatsApp. Requires Twilio env vars."""
     result = _send_whatsapp(body.to, body.message)
     return result
 
 
-# ── WhatsApp: send PDF (one-time link) ───────────────────────────────────
 def _normalize_phone(phone: str) -> str:
     p = "".join(c for c in phone if c.isdigit() or c == "+")
     if not p.startswith("+"):
@@ -494,14 +481,12 @@ def _normalize_phone(phone: str) -> str:
     return p
 
 
-# ── Export detections as CSV (API) ───────────────────────────────────────
+# ── Export CSV ────────────────────────────────────────────────────────────
 class ExportDetectionsBody(BaseModel):
-    detections: list = []  # [{ id, class, confidence, severity, bbox }, ...]
-
+    detections: list = []
 
 @app.post("/api/export/csv")
 async def export_detections_csv(body: ExportDetectionsBody):
-    """Return detections as CSV file. Same shape as client-side export."""
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(["id", "class", "confidence", "severity", "bbox"])
@@ -526,7 +511,6 @@ async def export_detections_csv(body: ExportDetectionsBody):
 
 @app.get("/api/report/download/{report_id}")
 async def report_download(report_id: str, password: str = Query(None)):
-    """One-time PDF download (used by WhatsApp link). If report was stored with a password, ?password= is required."""
     if report_id not in _report_downloads:
         return JSONResponse({"error": "Not found or expired"}, status_code=404)
     entry = _report_downloads[report_id]
@@ -539,6 +523,145 @@ async def report_download(report_id: str, password: str = Query(None)):
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="NautiCAI_Report.pdf"'},
     )
+
+
+@app.post("/api/detect/batch")
+async def detect_batch(
+    files: list[UploadFile] = File(...),
+    conf_thr: float = Form(0.25),
+    iou_thr: float = Form(0.45),
+    mode: str = Form("general"),
+    sev_filter: str = Form("All Detections"),
+    use_clahe: bool = Form(True),
+    clahe_clip: float = Form(3.0),
+    use_green: bool = Form(True),
+    use_edge: bool = Form(False),
+    turbidity_in: float = Form(0.0),
+    corr_turb: bool = Form(True),
+    marine_snow: bool = Form(False),
+):
+    """Run detection on multiple images at once. Returns results per image + combined summary."""
+    SEV_RANK = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
+    results = []
+    all_dets = []
+    mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
+    scan_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    for i, file in enumerate(files):
+        try:
+            pil_img = _read_upload(file)
+            enhanced = full_enhance(
+                pil_img,
+                use_clahe=use_clahe,
+                use_green=use_green,
+                turb_in=turbidity_in,
+                corr_turb=corr_turb,
+                use_edge=use_edge,
+                clahe_clip=clahe_clip,
+                marine_snow=marine_snow,
+            )
+            dets = run_detection(enhanced, conf_thr, iou_thr, mode)
+
+            if sev_filter == "Critical Only":
+                dets = [d for d in dets if d["severity"] == "Critical"]
+            elif sev_filter == "High+":
+                dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 3]
+            elif sev_filter == "Medium+":
+                dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 2]
+
+            annotated = annotate_image(enhanced, dets)
+            risk = compute_risk(dets)
+            grade = score_to_grade(risk)
+            sev_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+            for d in dets:
+                sev_counts[d.get("severity", "Medium")] += 1
+            all_dets.extend(dets)
+
+            results.append({
+                "image_index": i,
+                "filename": file.filename or f"image_{i+1}",
+                "total": len(dets),
+                "risk_score": risk,
+                "grade": grade,
+                "sev_counts": sev_counts,
+                "detections": dets,
+                "annotated_b64": _pil_to_b64(annotated),
+            })
+        except Exception as e:
+            results.append({
+                "image_index": i,
+                "filename": file.filename or f"image_{i+1}",
+                "error": str(e),
+            })
+
+    total_risk = compute_risk(all_dets)
+    total_grade = score_to_grade(total_risk)
+    total_sev = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+    for d in all_dets:
+        total_sev[d.get("severity", "Medium")] += 1
+
+    return {
+        "mission_id": mission_id,
+        "scan_time": scan_time,
+        "model": get_model_name(),
+        "active_model": get_active_model_key(),
+        "total_images": len(files),
+        "total_detections": len(all_dets),
+        "overall_risk_score": total_risk,
+        "overall_grade": total_grade,
+        "overall_sev_counts": total_sev,
+        "results": results,
+    }
+
+
+@app.post("/api/detect/3d")
+async def detect_3d(
+    file: UploadFile = File(...),
+    conf_thr: float = Form(0.25),
+    iou_thr: float = Form(0.45),
+    pipeline_length: float = Form(100.0),
+):
+    """Run YOLO detection and return 3D twin mapping data."""
+    pil_img = _read_upload(file)
+    enhanced = full_enhance(pil_img, use_clahe=True, use_green=True,
+                            turb_in=0.0, corr_turb=True, use_edge=False,
+                            clahe_clip=3.0, marine_snow=False)
+    dets = run_detection(enhanced, conf_thr, iou_thr, "pipeline")
+    W, H = enhanced.size
+
+    # Map detections to 3D pipeline coordinates
+    twin_defects = []
+    for d in dets:
+        cx = (d["x1"] + d["x2"]) / 2
+        cy = (d["y1"] + d["y2"]) / 2
+        pipeline_pos = (cx / W) * pipeline_length
+        angle = (cy / H) * 6.28318
+        twin_defects.append({
+            "id": d["id"],
+            "cls": d["cls"],
+            "severity": d["severity"],
+            "conf": round(d["conf"], 3),
+            "pipeline_pos": round(pipeline_pos, 2),
+            "angle": round(angle, 4),
+            "x1": d["x1"], "y1": d["y1"],
+            "x2": d["x2"], "y2": d["y2"],
+        })
+
+    risk = compute_risk(dets)
+    grade = score_to_grade(risk)
+    mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
+
+    return {
+        "mission_id": mission_id,
+        "total_defects": len(dets),
+        "risk_score": risk,
+        "grade": grade,
+        "pipeline_length": pipeline_length,
+        "model": get_model_name(),
+        "active_model": get_active_model_key(),
+        "defects_3d": twin_defects,
+        "annotated_b64": _pil_to_b64(annotate_image(enhanced, dets)),
+    }
 
 
 @app.post("/api/report/pdf/send-whatsapp")
@@ -560,7 +683,6 @@ async def pdf_send_whatsapp(
     marine_snow: bool = Form(False),
     pdf_password: str = Form(""),
 ):
-    """Generate PDF and send to WhatsApp. Optional pdf_password encrypts the PDF; we include it in the message for the recipient."""
     pil_img = _read_upload(file)
     enhanced = full_enhance(pil_img, use_clahe, use_green, turbidity_in, corr_turb, use_edge, clahe_clip, marine_snow)
     dets = run_detection(enhanced, conf_thr, iou_thr, mode)
@@ -593,93 +715,9 @@ async def pdf_send_whatsapp(
     if pwd:
         body_text += f"\nPassword to open PDF: {pwd}"
     if not download_url:
-        body_text = f"NautiCAI report {mission_id} generated. Log in to the demo to download."
+        body_text = f"NautiCAI report {mission_id} generated."
         if pwd:
             body_text += f" Password to open PDF: {pwd}"
     result = _send_whatsapp(phone, body_text, media_url=download_url if download_url else None)
-    result["download_url"] = download_url
-    return result
-
-
-@app.post("/api/report/pdf/video/send-whatsapp")
-async def pdf_video_send_whatsapp(
-    file: UploadFile = File(...),
-    to: str = Form(...),
-    conf_thr: float = Form(0.25),
-    iou_thr: float = Form(0.45),
-    mode: str = Form("general"),
-    vessel_name: str = Form("Unknown"),
-    inspector: str = Form("NautiCAI AutoScan v1.0"),
-    sample_n: int = Form(10),
-    use_clahe: bool = Form(True),
-    clahe_clip: float = Form(3.0),
-    use_green: bool = Form(True),
-    use_edge: bool = Form(False),
-    turbidity_in: float = Form(0.0),
-    corr_turb: bool = Form(True),
-    pdf_password: str = Form(""),
-):
-    """Generate video PDF and send to WhatsApp. Optional pdf_password encrypts the PDF."""
-    import cv2
-    suffix = Path(file.filename or "video.mp4").suffix
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tf:
-        tf.write(await file.read())
-        tmp_path = tf.name
-    cap = cv2.VideoCapture(tmp_path)
-    all_dets = []
-    first_enhanced = first_annotated = first_frame_dets = None
-    fn = 0
-    det_id_offset = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if fn % sample_n == 0:
-            pf = cv_to_pil(frame)
-            ef = full_enhance(pf, use_clahe, use_green, 0.0, corr_turb, use_edge, clahe_clip)
-            df_v = run_detection(ef, conf_thr, iou_thr, mode)
-            for d in df_v:
-                det_id_offset += 1
-                d["id"] = det_id_offset
-                d["frame"] = fn
-            all_dets.extend(df_v)
-            af = annotate_image(ef, df_v)
-            if first_enhanced is None:
-                first_enhanced, first_annotated, first_frame_dets = ef, af, df_v
-        fn += 1
-    cap.release()
-    try:
-        os.unlink(tmp_path)
-    except OSError:
-        pass
-    if first_enhanced is None:
-        first_enhanced = Image.new("RGB", (640, 480), (40, 40, 40))
-        first_annotated = first_enhanced
-        first_frame_dets = []
-    risk = compute_risk(all_dets)
-    grade = score_to_grade(risk)
-    mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
-    heatmap = build_heatmap(first_enhanced, first_frame_dets)
-    pdf_bytes = build_pdf(
-        mission_id, vessel_name, inspector, "video",
-        all_dets, first_enhanced, first_annotated, heatmap,
-        risk, grade, conf_thr, iou_thr,
-    )
-    pwd = (pdf_password or "").strip()
-    if pwd:
-        pdf_bytes = _encrypt_pdf(pdf_bytes, pwd)
-    rid = uuid.uuid4().hex[:12]
-    _report_downloads[rid] = (pdf_bytes, datetime.datetime.now(), None)
-    base_url = os.environ.get("NAUTICAI_BASE_URL", "").rstrip("/")
-    download_url = f"{base_url}/api/report/download/{rid}" if base_url else None
-    phone = _normalize_phone(to)
-    body_text = f"NautiCAI video report {mission_id} ready. Download: {download_url}"
-    if pwd:
-        body_text += f"\nPassword to open PDF: {pwd}"
-    if not download_url:
-        body_text = f"NautiCAI video report {mission_id} generated."
-        if pwd:
-            body_text += f" Password to open PDF: {pwd}"
-    result = _send_whatsapp(phone, body_text)
     result["download_url"] = download_url
     return result
