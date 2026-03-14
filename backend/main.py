@@ -1,3 +1,7 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
+from pdf_report import build_pdf, build_batch_pdf
 """
 NautiCAI — FastAPI Backend
 Serves the detection engine, visibility enhancement, PDF report, and heatmap APIs.
@@ -33,7 +37,7 @@ from detection import (
 
 # Also make app/pdf_report.py importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
-from pdf_report import build_pdf
+from pdf_report import build_pdf, build_batch_pdf
 
 app = FastAPI(
     title="NautiCAI API",
@@ -50,23 +54,64 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Batch PDF Report Endpoint ─────────────────────────────────────────────
+from typing import List, Optional
 
-# ── In-memory stores ──────────────────────────────────────────────────────
-_signups_file = Path(__file__).resolve().parent / "signups.json"
-_report_downloads = {}  # report_id -> (pdf_bytes, created_at, download_password or None)
-
-
-def _encrypt_pdf(pdf_bytes: bytes, user_password: str) -> bytes:
-    try:
-        from pypdf import PdfReader, PdfWriter
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        writer = PdfWriter(clone_from=reader)
-        writer.encrypt(user_password=user_password, algorithm="AES-256")
-        out = io.BytesIO()
-        writer.write(out)
-        return out.getvalue()
-    except Exception:
-        return pdf_bytes
+@app.post("/api/report/pdf/batch")
+async def report_pdf_batch(
+    files: List[UploadFile] = File(...),
+    conf_thr: float = Form(0.25),
+    iou_thr: float = Form(0.45),
+    mode: str = Form("general"),
+    sev_filter: str = Form("All Detections"),
+    use_clahe: bool = Form(True),
+    clahe_clip: float = Form(3.0),
+    use_green: bool = Form(True),
+    use_edge: bool = Form(False),
+    turbidity_in: float = Form(0.0),
+    corr_turb: bool = Form(True),
+    marine_snow: bool = Form(False),
+    vessel_name: str = Form("Unknown"),
+    inspector: str = Form("NautiCAI AutoScan v1.0"),
+    pdf_password: Optional[str] = Form(None),
+):
+    batch_results = []
+    for file in files:
+        pil_img = Image.open(io.BytesIO(await file.read())).convert("RGB")
+        enhanced = full_enhance(pil_img, use_clahe, use_green, turbidity_in, corr_turb, use_edge, clahe_clip, marine_snow)
+        dets = run_detection(enhanced, conf_thr, iou_thr, mode)
+        SEV_RANK = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
+        if sev_filter == "Critical Only":
+            dets = [d for d in dets if d["severity"] == "Critical"]
+        elif sev_filter == "High+":
+            dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 3]
+        elif sev_filter == "Medium+":
+            dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 2]
+        annotated = annotate_image(enhanced, dets)
+        heatmap = build_heatmap(enhanced, dets)
+        risk = compute_risk(dets)
+        grade = score_to_grade(risk)
+        batch_results.append({
+            "filename": file.filename or "image",
+            "orig_img": pil_img,
+            "enhanced_img": enhanced,
+            "annotated_img": annotated,
+            "heatmap_img": heatmap,
+            "dets": dets,
+            "risk": risk,
+            "grade": grade,
+        })
+    pdf_bytes = build_batch_pdf(
+        batch_results=batch_results,
+        vessel_name=vessel_name,
+        inspector=inspector,
+        pdf_password=pdf_password,
+    )
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="NautiCAI_Batch_Report.pdf"'},
+    )
 
 def _store_signup(data: dict):
     try:

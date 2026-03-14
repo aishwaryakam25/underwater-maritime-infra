@@ -1,3 +1,203 @@
+def build_batch_pdf(
+    batch_results,
+    vessel_name,
+    inspector,
+    pdf_password=None,
+):
+    """
+    Generate a batch PDF report for multiple images.
+    batch_results: List of dicts with keys:
+        - filename
+        - orig_img
+        - enhanced_img
+        - annotated_img
+        - heatmap_img
+        - dets
+        - risk
+        - grade
+    """
+    buf = io.BytesIO()
+    usable_w = PAGE_W - 2 * MARGIN
+    ts = datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
+    mission_id = f"BATCH-{hashlib.sha256((ts+vessel_name).encode()).hexdigest()[:8]}"
+    meta = {
+        "mission_id": mission_id,
+        "vessel": vessel_name or "N/A",
+        "model": "NautiCAI Vision Engine",
+        "date": ts,
+    }
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=MARGIN, rightMargin=MARGIN,
+        topMargin=24 * mm,
+        bottomMargin=16 * mm,
+        title=f"NautiCAI Batch Report — {mission_id}",
+        author="NautiCAI — Singapore Maritime AI Systems",
+    )
+    ST = _styles()
+    story = []
+    # Cover page
+    cover_tbl = Table(
+        [[
+            Paragraph("NautiCAI", ParagraphStyle("ct", fontName="Helvetica-Bold",
+                       fontSize=32, leading=38, textColor=WHITE)),
+        ],
+        [
+            Paragraph("BATCH INSPECTION REPORT", ParagraphStyle("cs", fontName="Helvetica-Bold",
+                       fontSize=14, leading=18, textColor=colors.HexColor("#0EA5E9"))),
+        ],
+        [Spacer(1, 4)],
+        [
+            Paragraph(f"Mission <b>{mission_id}</b>&nbsp;&nbsp;|&nbsp;&nbsp;"
+                       f"Vessel <b>{vessel_name or 'N/A'}</b>&nbsp;&nbsp;|&nbsp;&nbsp;"
+                       f"Inspector <b>{inspector}</b>",
+                       ParagraphStyle("cm", fontName="Helvetica",
+                       fontSize=9.5, leading=14,
+                       textColor=colors.HexColor("#94A3B8"))),
+        ],
+        [
+            Paragraph(f"{ts}&nbsp;&nbsp;|&nbsp;&nbsp;Total Images: {len(batch_results)}",
+                       ParagraphStyle("cd", fontName="Helvetica",
+                       fontSize=9, leading=13,
+                       textColor=colors.HexColor("#64748B"))),
+        ]],
+        colWidths=[usable_w],
+    )
+    cover_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), NAVY),
+        ("TOPPADDING",  (0, 0), (0, 0), 20),
+        ("BOTTOMPADDING", (0, 0), (-1, -2), 4),
+        ("BOTTOMPADDING", (0, -1), (-1, -1), 18),
+        ("LEFTPADDING", (0, 0), (-1, -1), 20),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 20),
+    ]))
+    story.append(cover_tbl)
+    story.append(Spacer(1, 12))
+    # Overall summary
+    story += _section("Batch Summary", ST)
+    total_detections = sum(len(r["dets"]) for r in batch_results)
+    sev_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+    for r in batch_results:
+        for d in r["dets"]:
+            sev_counts[d.get("severity", "Medium")] += 1
+    grades = [r["grade"] for r in batch_results]
+    risks = [r["risk"] for r in batch_results]
+    summary_tbl = Table([
+        ["Total Images", str(len(batch_results)), "Total Detections", str(total_detections)],
+        ["Critical", str(sev_counts["Critical"]), "High", str(sev_counts["High"]), "Medium", str(sev_counts["Medium"]), "Low", str(sev_counts["Low"])],
+        ["Grades", ", ".join(grades), "Risk Scores", ", ".join(str(r) for r in risks)],
+    ], colWidths=[38*mm, 38*mm, 38*mm, 38*mm])
+    summary_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), PANEL),
+        ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
+        ("INNERGRID", (0, 0), (-1, -1), 0.3, BORDER),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    story.append(summary_tbl)
+    story.append(Spacer(1, 10))
+    # Per-image pages
+    for idx, r in enumerate(batch_results):
+        story.append(PageBreak())
+        story += _section(f"Image {idx+1} — {r['filename']}", ST)
+        # Original image
+        if r["orig_img"] is not None:
+            story.append(Paragraph("Original Image", ST["h3"]))
+            story.append(_pil_to_rl(r["orig_img"], usable_w, 60*mm))
+            story.append(Spacer(1, 4))
+        # Enhanced image
+        if r["enhanced_img"] is not None:
+            story.append(Paragraph("Enhanced Image", ST["h3"]))
+            story.append(_pil_to_rl(r["enhanced_img"], usable_w, 60*mm))
+            story.append(Spacer(1, 4))
+        # Annotated image
+        if r["annotated_img"] is not None:
+            story.append(Paragraph("Annotated Image", ST["h3"]))
+            story.append(_pil_to_rl(r["annotated_img"], usable_w, 60*mm))
+            story.append(Spacer(1, 4))
+        # Heatmap
+        if r["heatmap_img"] is not None:
+            story.append(Paragraph("Heatmap", ST["h3"]))
+            story.append(_pil_to_rl(r["heatmap_img"], usable_w, 40*mm))
+            story.append(Spacer(1, 4))
+        # Metrics
+        story.append(Paragraph(f"Grade: {r['grade']} | Risk Score: {r['risk']} | Total Detections: {len(r['dets'])}", ST["body_sm"]))
+        # Detection table
+        if r["dets"]:
+            hdr_style = ST["tbl_hdr"]
+            header_row = [
+                Paragraph("#", hdr_style),
+                Paragraph("Defect Class", hdr_style),
+                Paragraph("Severity", hdr_style),
+                Paragraph("Conf.", hdr_style),
+                Paragraph("Bounding Box (px)", hdr_style),
+                Paragraph("Area (px8)", hdr_style),
+            ]
+            rows = [header_row]
+            for d in r["dets"]:
+                sev = d.get("severity", "Medium")
+                sev_col = SEV.get(sev, TEXT_DARK)
+                sev_bg  = SEV_BG.get(sev, WHITE)
+                sev_pill = Table(
+                    [[Paragraph(sev, ParagraphStyle(
+                        "sp_" + sev, fontName="Helvetica-Bold", fontSize=7.5,
+                        leading=10, textColor=sev_col, alignment=TA_CENTER))]],
+                    colWidths=[50],
+                )
+                sev_pill.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, -1), sev_bg),
+                    ("BOX", (0, 0), (-1, -1), 0.5, sev_col),
+                    ("TOPPADDING",    (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                    ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+                ]))
+                rows.append([
+                    Paragraph(f"{d['id']:02d}", ST["tbl_cell"]),
+                    Paragraph(d["cls"].replace("_", " "), ST["tbl_cell_bold"]),
+                    sev_pill,
+                    Paragraph(f"{d['conf'] * 100:.1f}%", ST["tbl_cell"]),
+                    Paragraph(f"({d['x1']},{d['y1']}) 8 ({d['x2']},{d['y2']})",
+                              ST["tbl_cell"]),
+                    Paragraph(f"{d.get('area', 0):,}", ST["tbl_cell"]),
+                ])
+            bbox_col_w = usable_w - (10 + 34 + 22 + 16 + 24) * mm
+            col_w = [10 * mm, 34 * mm, 22 * mm, 16 * mm, bbox_col_w, 24 * mm]
+            det_tbl = Table(rows, colWidths=col_w, repeatRows=1)
+            det_tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+                ("TEXTCOLOR",  (0, 0), (-1, 0), WHITE),
+                ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE",   (0, 0), (-1, 0), 8),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, PANEL]),
+                ("FONTSIZE",   (0, 1), (-1, -1), 8.5),
+                ("BOX",        (0, 0), (-1, -1), 0.5, BORDER),
+                ("INNERGRID",  (0, 0), (-1, -1), 0.25, BORDER),
+                ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
+                ("TOPPADDING",    (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]))
+            story.append(det_tbl)
+        story.append(Spacer(1, 8))
+    # Final summary page
+    story.append(PageBreak())
+    story += _section("Batch Inspection Summary", ST)
+    story.append(Paragraph(f"Total Images: {len(batch_results)}", ST["body_sm"]))
+    story.append(Paragraph(f"Total Detections: {total_detections}", ST["body_sm"]))
+    story.append(Paragraph(f"Severity Distribution: {sev_counts}", ST["body_sm"]))
+    story.append(Paragraph(f"Grades: {', '.join(grades)}", ST["body_sm"]))
+    story.append(Paragraph(f"Risk Scores: {', '.join(str(r) for r in risks)}", ST["body_sm"]))
+    doc.build(
+        story,
+        onFirstPage=lambda c, d: _header_footer(c, d, meta),
+        onLaterPages=lambda c, d: _header_footer(c, d, meta),
+    )
+    buf.seek(0)
+    return buf.getvalue()
 """
 NautiCAI — Professional PDF Inspection Report Generator
 Clean, print-ready layout · Helvetica typography · Header/Footer · Page numbers

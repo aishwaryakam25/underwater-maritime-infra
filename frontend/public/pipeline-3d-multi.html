@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NautiCAI Multi-Pipeline 3D</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #060d1a; font-family: 'Segoe UI', monospace; overflow: hidden; color: white; }
+canvas { display: block; width: 100%; height: 100%; }
+#label {
+  position: fixed; top: 12px; left: 14px;
+  padding: 6px 14px; background: rgba(0,204,68,0.12);
+#hint {
+  position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+  color: #334455; font-size: 11px; z-index: 10; pointer-events: none;
+#info {
+  position: fixed; top: 12px; right: 14px;
+  padding: 8px 14px; background: rgba(0,0,0,0.5);
+</style>
+</head>
+<body>
+<div id="label">LIVE — NautiCAI Pipeline Scan</div>
+<div id="hint">🖱️ Drag to rotate • Scroll to zoom</div>
+<div id="info">Waiting for pipeline data...</div>
+<canvas id="c"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function() {
+
+var SEV_COLOR = { Critical:0xff2200, High:0xff5500, Moderate:0xffaa00, Medium:0xffaa00, Low:0xffdd00, Mild:0xffdd00 };
+var PIPE_GAP = 3.5;
+
+// ── Renderer ──
+var canvas = document.getElementById('c');
+var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+renderer.setClearColor(0x060d1a);
+renderer.shadowMap.enabled = true;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+var scene = new THREE.Scene();
+var camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+camera.position.set(0, 2, 12);
+camera.lookAt(0, 0, 0);
+function resize() {
+  var w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+// ── Lights (exact same as original) ──
+scene.add(new THREE.AmbientLight(0x223344, 2));
+var dir = new THREE.DirectionalLight(0xffffff, 2);
+dir.position.set(5, 8, 5); scene.add(dir);
+var pt1 = new THREE.PointLight(0x0088ff, 1.5, 30);
+pt1.position.set(-5, 3, 3); scene.add(pt1);
+var pt2 = new THREE.PointLight(0x00ffcc, 0.8, 20);
+pt2.position.set(5, -2, -3); scene.add(pt2);
+
+// ── Grid (exact same) ──
+var grid = new THREE.GridHelper(30, 30, 0x0d1a2a, 0x0d1a2a);
+grid.position.y = -2;
+scene.add(grid);
+// ── Particles (exact same) ──
+var pGeo = new THREE.BufferGeometry();
+var pPos = [];
+for (var i = 0; i < 400; i++) pPos.push((Math.random()-0.5)*30, (Math.random()-0.5)*12, (Math.random()-0.5)*20);
+pGeo.setAttribute('position', new THREE.Float32BufferAttribute(pPos, 3));
+scene.add(new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x1a3a5c, size: 0.04 }));
+// ── Master group ──
+var masterGroup = new THREE.Group();
+scene.add(masterGroup);
+
+// All animated meshes for pulse effect
+var allPulseMeshes = [];
+
+// ── Build ONE pipeline (exact same construction as original) ──
+function buildOnePipeline(group, zOffset, data, index) {
+  var defs = data.defects_3d || [];
+  var grade = data.grade || '-';
+  var risk = data.risk_score || 0;
+  var total = data.total_defects || defs.length;
+
+  // Main pipe body — EXACT same as original
+  var pipe = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.55, 8, 64, 1, true),
+    new THREE.MeshStandardMaterial({
+      color: 0x1a3a5c, metalness: 0.85, roughness: 0.25,
+      side: THREE.DoubleSide, transparent: true, opacity: 0.82
+    })
+  );
+  pipe.rotation.z = Math.PI / 2;
+  pipe.position.z = zOffset;
+  pipe.castShadow = true;
+  group.add(pipe);
+
+  // End caps — EXACT same
+  [-4, 4].forEach(function(x) {
+    var cap = new THREE.Mesh(
+      new THREE.CircleGeometry(0.55, 32),
+      new THREE.MeshStandardMaterial({ color: 0x1a3a5c, metalness: 0.85 })
+    );
+    cap.position.set(x, 0, zOffset);
+    cap.rotation.y = x > 0 ? 0 : Math.PI;
+    group.add(cap);
+  });
+
+  // Joint rings — EXACT same positions and style
+  [-3, -1.5, 0, 1.5, 3].forEach(function(x) {
+    var ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.58, 0.055, 8, 32),
+      new THREE.MeshStandardMaterial({ color: 0x2255aa, metalness: 0.9, roughness: 0.2 })
+    );
+    ring.position.set(x, 0, zOffset);
+    ring.rotation.y = Math.PI / 2;
+    group.add(ring);
+  });
+
+  // Wireframe overlays — EXACT same
+  for (var wi = 0; wi < 3; wi++) {
+    var wf = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.553, 0.553, 8, 32, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x1144aa, wireframe: true, transparent: true, opacity: 0.05 })
+    );
+    wf.rotation.z = Math.PI / 2;
+    wf.position.z = zOffset;
+    group.add(wf);
+  }
+
+  // Pipeline label
+  var lc = document.createElement('canvas');
+  lc.width = 512; lc.height = 72;
+  var ctx = lc.getContext('2d');
+  ctx.fillStyle = 'rgba(6,13,26,0.85)';
+  ctx.fillRect(0, 0, 512, 72);
+  ctx.strokeStyle = 'rgba(0,204,255,0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(1, 1, 510, 70);
+  ctx.fillStyle = '#00ccff';
+  ctx.font = 'bold 22px Segoe UI';
+  ctx.fillText('Pipeline ' + (index + 1), 14, 28);
+  ctx.fillStyle = '#5577aa';
+  ctx.font = '15px Segoe UI';
+  ctx.fillText('Grade: ' + grade + '   Risk: ' + risk + '%   Defects: ' + total, 14, 56);
+  var tex = new THREE.CanvasTexture(lc);
+  tex.minFilter = THREE.LinearFilter;
+  var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+  sp.scale.set(4, 0.56, 1);
+  sp.position.set(0, 1.4, zOffset);
+  group.add(sp);
+
+  // Defect markers — EXACT same style as original
+  defs.forEach(function(d) {
+    var color = SEV_COLOR[d.severity] || 0x00ccff;
+    var size = (d.severity === 'Critical' || d.severity === 'High') ? 0.13 :
+               (d.severity === 'Medium' || d.severity === 'Moderate') ? 0.10 : 0.08;
+    var r = 0.62;
+    var x = (d.pipeline_pos / 100) * 8 - 4;
+    var y = Math.sin(d.angle) * r;
+    var z = zOffset + Math.cos(d.angle) * r;
+
+    // Sphere marker — same material as original
+    var sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(size, 16, 16),
+      new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.7 })
+    );
+    sphere.position.set(x, y, z);
+    group.add(sphere);
+
+    // Pulse ring — same as original
+    var pulse = new THREE.Mesh(
+      new THREE.RingGeometry(size + 0.02, size + 0.06, 16),
+      new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide, transparent: true, opacity: 0.5 })
+    );
+    pulse.position.set(x, y, z);
+    pulse.lookAt(x * 3, y * 3, z * 3);
+    pulse.userData = { isPulse: true };
+    group.add(pulse);
+    allPulseMeshes.push(pulse);
+  });
+}
+
+// ── Receive data ──
+var pipelines = [];
+
+window.addEventListener('message', function(e) {
+  if (!e.data) return;
+
+  if (e.data.type === 'NAUTICAI_MULTI_PIPELINES') {
+    pipelines = e.data.data || [];
+    rebuildAll();
+  }
+
+  // Backwards compat — single pipeline
+  if (e.data.type === 'NAUTICAI_DETECTIONS') {
+    pipelines = [e.data.data];
+    rebuildAll();
+  }
+});
+
+function rebuildAll() {
+  // Clear
+  while (masterGroup.children.length > 0) masterGroup.remove(masterGroup.children[0]);
+  allPulseMeshes.length = 0;
+
+  var count = pipelines.length;
+  var totalW = (count - 1) * PIPE_GAP;
+  var startZ = -totalW / 2;
+
+  for (var p = 0; p < count; p++) {
+    buildOnePipeline(masterGroup, startZ + p * PIPE_GAP, pipelines[p], p);
+  }
+
+  // Update info
+  var totalDef = 0;
+  for (var j = 0; j < pipelines.length; j++) {
+    totalDef += (pipelines[j].defects_3d || []).length;
+  }
+  document.getElementById('info').innerHTML =
+    '<span style="color:#00ccff;font-weight:bold">' + count + '</span> Pipeline' + (count !== 1 ? 's' : '') +
+    ' &middot; <span style="color:#ffaa00;font-weight:bold">' + totalDef + '</span> Defect' + (totalDef !== 1 ? 's' : '');
+
+  // Adjust camera based on pipeline count
+  camera.position.z = Math.max(8, 8 + (count - 1) * 2.5);
+  camera.position.y = 2 + (count - 1) * 0.3;
+}
+
+// ── Mouse / Touch (exact same as original) ──
+var isDragging = false, px = 0, py = 0, autoRotate = true;
+
+canvas.addEventListener('mousedown', function(e) { isDragging = true; px = e.clientX; py = e.clientY; });
+window.addEventListener('mouseup', function() { isDragging = false; });
+window.addEventListener('mousemove', function(e) {
+  if (!isDragging) return;
+  masterGroup.rotation.y += (e.clientX - px) * 0.006;
+  masterGroup.rotation.x += (e.clientY - py) * 0.004;
+  px = e.clientX; py = e.clientY;
+});
+canvas.addEventListener('wheel', function(e) {
+  camera.position.z = Math.max(3, Math.min(30, camera.position.z + e.deltaY * 0.01));
+});
+canvas.addEventListener('touchstart', function(e) { isDragging = true; px = e.touches[0].clientX; py = e.touches[0].clientY; });
+canvas.addEventListener('touchend', function() { isDragging = false; });
+canvas.addEventListener('touchmove', function(e) {
+  if (!isDragging) return;
+  masterGroup.rotation.y += (e.touches[0].clientX - px) * 0.006;
+  masterGroup.rotation.x += (e.touches[0].clientY - py) * 0.004;
+  px = e.touches[0].clientX; py = e.touches[0].clientY;
+});
+
+// ── Animation (exact same pulse effect as original) ──
+var t = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  t += 0.016;
+  if (autoRotate && !isDragging) masterGroup.rotation.y += 0.004;
+
+  // Pulse defect rings — same animation as original
+  allPulseMeshes.forEach(function(m) {
+    if (m.userData.isPulse) {
+      var s = 1 + Math.sin(t * 3) * 0.3;
+      m.scale.setScalar(s);
+      m.material.opacity = 0.3 + Math.sin(t * 3) * 0.2;
+    }
+  });
+
+  renderer.render(scene, camera);
+}
+animate();
+
+})();
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NautiCAI — Multi-Pipeline 3D Digital Twin</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #040a18; overflow: hidden; font-family: 'Courier New', monospace; }
+  canvas { display: block; }
+  #label { position: fixed; top: 14px; left: 14px; padding: 7px 16px; background: rgba(0,204,68,0.12); border: 1.5px solid rgba(0,204,68,0.5); border-radius: 6px; font-size: 13px; color: #0c6; font-weight: 700; letter-spacing: 1.2px; z-index: 10; pointer-events: none; }
+  #hint { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); padding: 6px 18px; background: rgba(0,0,0,0.5); border-radius: 6px; font-size: 11px; color: rgba(255,255,255,0.4); z-index: 10; pointer-events: none; }
+  #info { position: fixed; top: 14px; right: 14px; padding: 8px 14px; background: rgba(0,0,0,0.6); border: 1px solid rgba(34,211,238,0.2); border-radius: 8px; font-size: 11px; color: rgba(255,255,255,0.6); z-index: 10; pointer-events: none; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div id="label">LIVE — NautiCAI Multi-Pipeline</div>
+<div id="hint">Drag to rotate · Scroll to zoom</div>
+<div id="info">Waiting for data...</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ...existing code...
+(function() {
+  var SEV_COLORS = { critical: 0xef4444, high: 0xf97316, medium: 0xf59e0b, low: 0x22c55e };
+  var PIPE_LEN = 14, PIPE_R = 0.35, PIPE_GAP = 3.2, SEGS = 64;
+
+  // Scene
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x040a18);
+  scene.fog = new THREE.FogExp2(0x040a18, 0.012);
+
+  // Camera
+  var W = window.innerWidth, H = window.innerHeight;
+  var camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 500);
+  camera.position.set(0, 6, 24);
+  camera.lookAt(0, 0, 0);
+
+  // Renderer
+  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  // Lights — same as original
+  scene.add(new THREE.AmbientLight(0x1a2a4a, 0.5));
+  var dl = new THREE.DirectionalLight(0x88bbff, 1.2);
+  dl.position.set(10, 15, 10); dl.castShadow = true;
+  dl.shadow.mapSize.width = 2048; dl.shadow.mapSize.height = 2048;
+  scene.add(dl);
+  var pl1 = new THREE.PointLight(0x22d3ee, 0.6, 50);
+  pl1.position.set(-8, 6, 4); scene.add(pl1);
+  var pl2 = new THREE.PointLight(0x0066cc, 0.3, 40);
+  pl2.position.set(8, -2, -4); scene.add(pl2);
+  scene.add(new THREE.HemisphereLight(0x1a3050, 0x040810, 0.4));
+
+  // Grid
+  var gridHelper = new THREE.GridHelper(50, 50, 0x0a1a35, 0x071228);
+  gridHelper.position.y = -2;
+  scene.add(gridHelper);
+
+  // Stars
+  var sg = new THREE.BufferGeometry(), sv = [];
+  for (var i = 0; i < 300; i++) sv.push((Math.random()-0.5)*120, Math.random()*40+5, (Math.random()-0.5)*120);
+  sg.setAttribute('position', new THREE.Float32BufferAttribute(sv, 3));
+  scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0x334466, size: 0.1 }));
+
+  // Pivot
+  var pivot = new THREE.Group();
+  scene.add(pivot);
+
+  // Mouse
+  var isDrag = false, prevX = 0, prevY = 0;
+  var userRotY = 0, userRotX = -0.3, zoomLevel = 1, autoRot = 0;
+
+  renderer.domElement.addEventListener('mousedown', function(e) { isDrag = true; prevX = e.clientX; prevY = e.clientY; });
+  window.addEventListener('mouseup', function() { isDrag = false; });
+  renderer.domElement.addEventListener('mousemove', function(e) {
+    if (!isDrag) return;
+    userRotY += (e.clientX - prevX) * 0.006;
+    userRotX = Math.max(-1.0, Math.min(0.5, userRotX + (e.clientY - prevY) * 0.004));
+    prevX = e.clientX; prevY = e.clientY;
+  });
+  renderer.domElement.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    zoomLevel = Math.max(0.4, Math.min(3.0, zoomLevel - e.deltaY * 0.001));
+  }, { passive: false });
+
+  // Resize
+  window.addEventListener('resize', function() {
+    W = window.innerWidth; H = window.innerHeight;
+    camera.aspect = W / H; camera.updateProjectionMatrix();
+    renderer.setSize(W, H);
+  });
+
+  // Build pipeline function — matches original design exactly
+  function buildPipeline(zOffset, data, index) {
+    // ...existing code...
+  }
+
+  // Listen for data
+  var pipelines = [];
+
+  window.addEventListener('message', function(e) {
+    if (!e.data) return;
+
+    // Accept NAUTICAI_MULTI_PIPELINES — array of pipeline data
+    if (e.data.type === 'NAUTICAI_MULTI_PIPELINES') {
+      pipelines = e.data.data || [];
+      rebuildAll();
+    }
+
+    // Also accept single pipeline format for backwards compat
+    if (e.data.type === 'NAUTICAI_DETECTIONS') {
+      pipelines = [e.data.data];
+      rebuildAll();
+    }
+  });
+
+  function rebuildAll() {
+    // ...existing code...
+  }
+
+  // Animate
+  function animate() {
+    requestAnimationFrame(animate);
+    autoRot += 0.0015;
+    pivot.rotation.y = autoRot + userRotY;
+    pivot.rotation.x = userRotX;
+    camera.position.z = 24 / zoomLevel;
+    camera.position.y = 6 / Math.sqrt(zoomLevel);
+    camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+  }
+  animate();
+})();
+</script>
+</body>
+</html>

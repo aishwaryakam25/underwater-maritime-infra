@@ -1,89 +1,118 @@
 import axios from "axios";
 
-// In production, the API is on the same origin (behind nginx/Cloud Run).
-// In dev, CRA proxy (package.json "proxy") forwards /api/* to localhost:8000.
-const API = process.env.REACT_APP_API_URL || "";
+const API = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:8000",
+});
 
-const api = axios.create({ baseURL: API });
+export const getHealth = async () => (await API.get("/health")).data;
 
-/** Health check */
-export const getHealth = () => api.get("/api/health").then(r => r.data);
-
-/** Run detection on an image file */
-export const runDetection = (file, params) => {
+export const runDetection = async (file, params) => {
   const fd = new FormData();
   fd.append("file", file);
-  Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
-  return api.post("/api/detect", fd).then(r => r.data);
+  Object.entries(params || {}).forEach(([k, v]) => fd.append(k, v));
+
+  const res = await API.post("/api/detect", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data;
 };
 
-/** Get enhancement comparison images */
-export const runEnhance = (file, params) => {
+export const runEnhance = async (file, params) => {
   const fd = new FormData();
   fd.append("file", file);
-  Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
-  return api.post("/api/enhance", fd).then(r => r.data);
+  Object.entries(params || {}).forEach(([k, v]) => fd.append(k, v));
+
+  const res = await API.post("/api/enhance", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data;
 };
 
-/** Download PDF report */
 export const downloadPDF = async (file, params) => {
   const fd = new FormData();
   fd.append("file", file);
-  Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
-  const resp = await api.post("/api/report/pdf", fd, { responseType: "blob" });
-  // Trigger browser download
-  const url = window.URL.createObjectURL(new Blob([resp.data], { type: "application/pdf" }));
+  Object.entries(params || {}).forEach(([k, v]) => fd.append(k, v));
+
+  const res = await API.post("/api/report/pdf", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+    responseType: "blob",
+  });
+
+  const url = URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = resp.headers["content-disposition"]?.split("filename=")[1]?.replace(/"/g, "") || "NautiCAI_Report.pdf";
-  document.body.appendChild(a);
+  a.download = "NautiCAI_Report.pdf";
   a.click();
-  a.remove();
-  window.URL.revokeObjectURL(url);
 };
 
-/** Run video analysis */
-export const runVideoDetection = (file, params) => {
+export const downloadBatchPDF = async (files, params) => {
+  const fd = new FormData();
+  files.forEach((file) => fd.append("files", file));
+  Object.entries(params || {}).forEach(([k, v]) => fd.append(k, v));
+
+  const res = await API.post("/api/report/pdf/batch", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+    responseType: "blob",
+  });
+
+  const url = URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "NautiCAI_Batch_Report.pdf";
+  a.click();
+};
+
+export const runVideoDetection = async (file, params) => {
   const fd = new FormData();
   fd.append("file", file);
-  Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
-  return api.post("/api/video/detect", fd).then(r => r.data);
+  Object.entries(params || {}).forEach(([k, v]) => fd.append(k, v));
+
+  const res = await API.post("/api/video/detect", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data;
 };
 
-/** Download PDF report for video (ROV footage) */
 export const downloadVideoPDF = async (file, params) => {
   const fd = new FormData();
   fd.append("file", file);
-  Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
-  const resp = await api.post("/api/report/pdf/video", fd, { responseType: "blob" });
-  const url = window.URL.createObjectURL(new Blob([resp.data], { type: "application/pdf" }));
+  Object.entries(params || {}).forEach(([k, v]) => fd.append(k, v));
+
+  const res = await API.post("/api/video/report/pdf", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+    responseType: "blob",
+  });
+
+  const url = URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = resp.headers["content-disposition"]?.split("filename=")[1]?.replace(/"/g, "") || "NautiCAI_Video_Report.pdf";
-  document.body.appendChild(a);
+  a.download = "NautiCAI_Video_Report.pdf";
   a.click();
-  a.remove();
-  window.URL.revokeObjectURL(url);
 };
 
-/** Send PDF report to WhatsApp (image report). Returns { sent, message, download_url? } */
 export const sendPDFToWhatsApp = async (file, params) => {
   const fd = new FormData();
   fd.append("file", file);
-  Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
-  const { data } = await api.post("/api/report/pdf/send-whatsapp", fd);
-  return data;
+  Object.entries(params || {}).forEach(([k, v]) => fd.append(k, v));
+
+  const res = await API.post("/api/report/pdf/whatsapp", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data;
 };
 
-/** Send video PDF report to WhatsApp */
 export const sendVideoPDFToWhatsApp = async (file, params) => {
   const fd = new FormData();
   fd.append("file", file);
-  Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
-  const { data } = await api.post("/api/report/pdf/video/send-whatsapp", fd);
-  return data;
+  Object.entries(params || {}).forEach(([k, v]) => fd.append(k, v));
+
+  const res = await API.post("/api/video/report/pdf/whatsapp", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data;
 };
 
-/** Send a text message to WhatsApp (alerts). */
-export const sendWhatsAppMessage = (to, message) =>
-  api.post("/api/whatsapp/send", { to, message }).then((r) => r.data);
+export const sendWhatsAppMessage = async (to, message) => {
+  const res = await API.post("/api/whatsapp/message", { to, message });
+  return res.data;
+};
