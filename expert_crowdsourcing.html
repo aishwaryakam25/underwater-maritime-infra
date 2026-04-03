@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NautiCAI Expert Crowdsourcing Platform</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0a0e1a; color: #e0e6f0; min-height: 100vh; }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #003366 0%, #001a33 100%);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 2px solid #0066cc;
+  }
+  .logo { font-size: 24px; font-weight: 800; color: #fff; letter-spacing: 1px; }
+  .logo span { color: #00aaff; }
+  .tagline { font-size: 11px; color: #88aacc; margin-top: 2px; }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .badge { background: #00aaff22; border: 1px solid #00aaff; color: #00aaff; padding: 4px 12px; border-radius: 20px; font-size: 12px; }
+  .earnings { background: #00cc6622; border: 1px solid #00cc66; color: #00cc66; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+
+  /* Layout */
+  .container { display: grid; grid-template-columns: 280px 1fr 300px; gap: 0; height: calc(100vh - 70px); }
+
+  /* Left Panel */
+  .left-panel { background: #0d1526; border-right: 1px solid #1a2a44; padding: 20px; overflow-y: auto; }
+  .panel-title { font-size: 13px; font-weight: 700; color: #88aacc; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
+
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .stat-card { background: #1a2a44; border-radius: 8px; padding: 12px; text-align: center; }
+  .stat-value { font-size: 22px; font-weight: 800; color: #00aaff; }
+  .stat-label { font-size: 10px; color: #88aacc; margin-top: 2px; }
+
+  .queue-item { background: #1a2a44; border-radius: 8px; padding: 12px; margin-bottom: 10px; cursor: pointer; border: 2px solid transparent; transition: all 0.2s; }
+  .queue-item:hover { border-color: #0066cc; }
+  .queue-item.active { border-color: #00aaff; background: #1a3a5c; }
+  .queue-item-title { font-size: 13px; font-weight: 600; color: #e0e6f0; }
+  .queue-item-meta { font-size: 11px; color: #88aacc; margin-top: 4px; }
+  .confidence-bar { height: 4px; background: #0a1526; border-radius: 2px; margin-top: 8px; }
+  .confidence-fill { height: 100%; border-radius: 2px; }
+  .conf-low { background: #ff4444; }
+  .conf-mid { background: #ffaa00; }
+  .conf-high { background: #00cc66; }
+
+  /* Main Panel */
+  .main-panel { background: #0d1526; padding: 20px; overflow-y: auto; }
+  .image-container { background: #061020; border-radius: 12px; border: 1px solid #1a2a44; position: relative; overflow: hidden; margin-bottom: 16px; }
+  .image-header { padding: 12px 16px; background: #1a2a44; display: flex; justify-content: space-between; align-items: center; }
+  .image-title { font-size: 14px; font-weight: 700; }
+  .ai-badge { background: #ff440022; border: 1px solid #ff4444; color: #ff4444; padding: 3px 10px; border-radius: 12px; font-size: 11px; }
+
+  .image-canvas { width: 100%; height: 340px; background: linear-gradient(135deg, #061525 0%, #0a2040 50%, #061525 100%); position: relative; display: flex; align-items: center; justify-content: center; }
+
+  /* Underwater scene */
+  .underwater-scene { width: 100%; height: 100%; position: relative; overflow: hidden; }
+  .pipeline { position: absolute; top: 45%; left: 5%; right: 5%; height: 60px; background: linear-gradient(180deg, #4a5568 0%, #2d3748 50%, #1a202c 100%); border-radius: 8px; transform: translateY(-50%); }
+  .pipeline::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 15px; background: linear-gradient(180deg, #718096 0%, transparent 100%); border-radius: 8px 8px 0 0; }
+
+  .defect-box { position: absolute; border: 2px dashed #ff4444; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+  .defect-box:hover { background: #ff444422; }
+  .defect-label { position: absolute; top: -22px; left: 0; background: #ff4444; color: white; font-size: 10px; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+  .defect-conf { position: absolute; bottom: -20px; left: 0; color: #ff8888; font-size: 10px; }
+
+  .annotation-tool { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tool-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid #1a3a5c; background: #1a2a44; color: #88aacc; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+  .tool-btn:hover { border-color: #00aaff; color: #00aaff; }
+  .tool-btn.active { background: #003366; border-color: #00aaff; color: #00aaff; }
+
+  /* Right Panel */
+  .right-panel { background: #0d1526; border-left: 1px solid #1a2a44; padding: 20px; overflow-y: auto; }
+
+  .form-group { margin-bottom: 14px; }
+  .form-label { font-size: 12px; color: #88aacc; font-weight: 600; margin-bottom: 6px; display: block; }
+  .form-select, .form-textarea { width: 100%; background: #1a2a44; border: 1px solid #2a3a54; color: #e0e6f0; padding: 8px 12px; border-radius: 6px; font-size: 12px; outline: none; transition: border-color 0.2s; }
+  .form-select:focus, .form-textarea:focus { border-color: #00aaff; }
+  .form-textarea { resize: vertical; min-height: 70px; font-family: inherit; }
+
+  .severity-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .severity-btn { padding: 8px; border-radius: 6px; border: 2px solid transparent; text-align: center; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+  .sev-low { background: #00cc6622; color: #00cc66; border-color: #00cc6644; }
+  .sev-low:hover, .sev-low.selected { border-color: #00cc66; background: #00cc6633; }
+  .sev-moderate { background: #ffaa0022; color: #ffaa00; border-color: #ffaa0044; }
+  .sev-moderate:hover, .sev-moderate.selected { border-color: #ffaa00; background: #ffaa0033; }
+  .sev-high { background: #ff880022; color: #ff8800; border-color: #ff880044; }
+  .sev-high:hover, .sev-high.selected { border-color: #ff8800; background: #ff880033; }
+  .sev-critical { background: #ff444422; color: #ff4444; border-color: #ff444444; }
+  .sev-critical:hover, .sev-critical.selected { border-color: #ff4444; background: #ff444433; }
+
+  .agree-bar { display: flex; gap: 8px; }
+  .agree-btn { flex: 1; padding: 8px; border-radius: 6px; border: 1px solid; text-align: center; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+  .btn-agree { background: #00cc6622; border-color: #00cc6644; color: #00cc66; }
+  .btn-agree:hover { background: #00cc6633; border-color: #00cc66; }
+  .btn-disagree { background: #ff444422; border-color: #ff444444; color: #ff4444; }
+  .btn-disagree:hover { background: #ff444433; border-color: #ff4444; }
+
+  .submit-btn { width: 100%; padding: 12px; background: linear-gradient(135deg, #0066cc, #00aaff); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s; margin-top: 8px; }
+  .submit-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 20px #00aaff44; }
+
+  .payment-info { background: #00cc6611; border: 1px solid #00cc6633; border-radius: 8px; padding: 12px; margin-top: 12px; text-align: center; }
+  .payment-amount { font-size: 20px; font-weight: 800; color: #00cc66; }
+  .payment-label { font-size: 11px; color: #88aacc; }
+
+  /* Leaderboard */
+  .leaderboard-item { display: flex; align-items: center; gap: 10px; padding: 8px; background: #1a2a44; border-radius: 6px; margin-bottom: 6px; }
+  .rank { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; }
+  .rank-1 { background: #ffd700; color: #000; }
+  .rank-2 { background: #c0c0c0; color: #000; }
+  .rank-3 { background: #cd7f32; color: #000; }
+  .rank-n { background: #1a3a5c; color: #88aacc; }
+  .lb-name { flex: 1; font-size: 12px; font-weight: 600; }
+  .lb-score { font-size: 12px; color: #00cc66; font-weight: 700; }
+
+  .notification { background: #00aaff11; border: 1px solid #00aaff33; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; font-size: 12px; color: #88ccff; display: flex; align-items: center; gap: 8px; }
+  .notif-dot { width: 8px; height: 8px; border-radius: 50%; background: #00aaff; flex-shrink: 0; }
+
+  .progress-ring { text-align: center; padding: 16px; }
+  .progress-label { font-size: 11px; color: #88aacc; margin-top: 4px; }
+  .progress-bar-outer { background: #1a2a44; border-radius: 10px; height: 8px; margin: 8px 0; }
+  .progress-bar-inner { height: 100%; border-radius: 10px; background: linear-gradient(90deg, #0066cc, #00aaff); }
+
+  .divider { height: 1px; background: #1a2a44; margin: 16px 0; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="logo">Nauti<span>CAI</span> <span style="font-size:14px;color:#88aacc;font-weight:400">Expert Platform</span></div>
+    <div class="tagline">AI-Powered Underwater Infrastructure Inspection · Expert Annotation Network</div>
+  </div>
+  <div class="header-right">
+    <div class="badge">🎓 Certified Marine Engineer</div>
+    <div class="earnings">💰 $47.50 earned today</div>
+    <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#0066cc,#00aaff);display:flex;align-items:center;justify-content:center;font-weight:800;">A</div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- LEFT: Queue -->
+  <div class="left-panel">
+    <div class="panel-title">📋 Annotation Queue</div>
+
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-value">23</div><div class="stat-label">Completed</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:#ffaa00">8</div><div class="stat-label">Pending</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:#00cc66">98%</div><div class="stat-label">Accuracy</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:#ff8800">4.9★</div><div class="stat-label">Rating</div></div>
+    </div>
+
+    <div class="panel-title">Low Confidence Detections</div>
+
+    <div class="queue-item active" onclick="selectItem(this, 'Pipeline Leakage', '43%')">
+      <div class="queue-item-title">🔴 Pipeline Leakage</div>
+      <div class="queue-item-meta">Frame 1247 · Singapore Strait · $2.50</div>
+      <div class="confidence-bar"><div class="confidence-fill conf-low" style="width:43%"></div></div>
+      <div style="font-size:10px;color:#ff8888;margin-top:4px">AI Confidence: 43% — needs review</div>
+    </div>
+
+    <div class="queue-item" onclick="selectItem(this, 'Corrosion Patch', '61%')">
+      <div class="queue-item-title">🟠 Corrosion Patch</div>
+      <div class="queue-item-meta">Frame 892 · Johor Strait · $2.00</div>
+      <div class="confidence-bar"><div class="confidence-fill conf-mid" style="width:61%"></div></div>
+      <div style="font-size:10px;color:#ffaa88;margin-top:4px">AI Confidence: 61% — needs review</div>
+    </div>
+
+    <div class="queue-item" onclick="selectItem(this, 'Biofouling', '55%')">
+      <div class="queue-item-title">🟡 Biofouling Coverage</div>
+      <div class="queue-item-meta">Frame 3401 · Malacca Strait · $1.50</div>
+      <div class="confidence-bar"><div class="confidence-fill conf-mid" style="width:55%"></div></div>
+      <div style="font-size:10px;color:#ffaa88;margin-top:4px">AI Confidence: 55% — needs review</div>
+    </div>
+
+    <div class="queue-item" onclick="selectItem(this, 'Pipe Coupling', '38%')">
+      <div class="queue-item-title">🔴 Pipe Coupling Damage</div>
+      <div class="queue-item-meta">Frame 2109 · Singapore · $3.00</div>
+      <div class="confidence-bar"><div class="confidence-fill conf-low" style="width:38%"></div></div>
+      <div style="font-size:10px;color:#ff8888;margin-top:4px">AI Confidence: 38% — needs review</div>
+    </div>
+
+    <div class="queue-item" onclick="selectItem(this, 'Anode Depletion', '72%')">
+      <div class="queue-item-title">🟢 Anode Depletion</div>
+      <div class="queue-item-meta">Frame 567 · Batam · $1.00</div>
+      <div class="confidence-bar"><div class="confidence-fill conf-high" style="width:72%"></div></div>
+      <div style="font-size:10px;color:#88ff88;margin-top:4px">AI Confidence: 72% — quick verify</div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="panel-title">🔔 Notifications</div>
+    <div class="notification"><div class="notif-dot"></div>Your annotation on Frame 1089 was verified ✓</div>
+    <div class="notification"><div class="notif-dot" style="background:#ffaa00"></div>New high-value batch available: $5.00/frame</div>
+    <div class="notification"><div class="notif-dot" style="background:#00cc66"></div>Weekly payout processed: $312.50</div>
+  </div>
+
+  <!-- MAIN: Annotation -->
+  <div class="main-panel">
+    <div class="annotation-tool">
+      <button class="tool-btn active" onclick="setTool(this,'select')">↖ Select</button>
+      <button class="tool-btn" onclick="setTool(this,'bbox')">⬜ Bounding Box</button>
+      <button class="tool-btn" onclick="setTool(this,'polygon')">⬡ Polygon</button>
+      <button class="tool-btn" onclick="setTool(this,'point')">• Point</button>
+      <button class="tool-btn" onclick="setTool(this,'measure')">📏 Measure</button>
+      <button class="tool-btn" style="margin-left:auto;color:#ff8888;border-color:#ff444444" onclick="clearAnnotations()">🗑 Clear</button>
+    </div>
+
+    <div class="image-container">
+      <div class="image-header">
+        <div class="image-title" id="imageTitle">Frame 1247 — Pipeline Leakage Detection · Singapore Strait</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="ai-badge">AI: 43% confidence</div>
+          <div style="font-size:12px;color:#88aacc">Depth: 12m · Temp: 28°C</div>
+        </div>
+      </div>
+
+      <div class="image-canvas">
+        <div class="underwater-scene">
+          <!-- Underwater background particles -->
+          <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 30% 40%, #0a3060 0%, #051525 60%, #020810 100%)"></div>
+
+          <!-- Bubbles -->
+          <div style="position:absolute;width:6px;height:6px;border-radius:50%;background:#ffffff22;top:20%;left:30%;animation:float 3s infinite"></div>
+          <div style="position:absolute;width:4px;height:4px;border-radius:50%;background:#ffffff15;top:40%;left:60%;animation:float 4s infinite 1s"></div>
+          <div style="position:absolute;width:8px;height:8px;border-radius:50%;background:#ffffff18;top:60%;left:45%;animation:float 5s infinite 0.5s"></div>
+
+          <!-- Pipeline -->
+          <div class="pipeline">
+            <div style="position:absolute;top:8px;left:20%;right:20%;height:4px;background:#718096;border-radius:2px;opacity:0.5"></div>
+          </div>
+
+          <!-- AI Detected defect boxes -->
+          <div class="defect-box" style="top:35%;left:25%;width:120px;height:55px" id="defect1">
+            <div class="defect-label">Leakage — 43%</div>
+            <div class="defect-conf">Low confidence</div>
+            <!-- Simulated leak effect -->
+            <div style="position:absolute;top:20%;left:20%;width:30px;height:30px;background:radial-gradient(circle,#4488ff44,transparent);border-radius:50%"></div>
+          </div>
+
+          <div class="defect-box" style="top:38%;left:55%;width:80px;height:45px;border-color:#ffaa00" id="defect2">
+            <div class="defect-label" style="background:#ffaa00">Corrosion — 61%</div>
+          </div>
+
+          <!-- Seabed -->
+          <div style="position:absolute;bottom:0;left:0;right:0;height:50px;background:linear-gradient(180deg,transparent,#0a1a0a);border-top:1px solid #1a3a1a"></div>
+        </div>
+      </div>
+
+      <div style="padding:10px 16px;background:#1a2234;display:flex;gap:16px;font-size:11px;color:#88aacc">
+        <span>📍 GPS: 1.2847°N, 103.8610°E</span>
+        <span>📅 Captured: 28 March 2026, 14:32 SGT</span>
+        <span>🤖 Model: NautiCAI-YOLOv8m-seg-v1.0</span>
+        <span>🎯 2 detections flagged for review</span>
+      </div>
+    </div>
+
+    <!-- Image navigation -->
+    <div style="display:flex;justify-content:center;gap:12px;margin-top:8px">
+      <button class="tool-btn" onclick="navigate(-1)">← Previous</button>
+      <span style="font-size:12px;color:#88aacc;line-height:32px">Frame 1247 / 3892</span>
+      <button class="tool-btn" onclick="navigate(1)">Next →</button>
+    </div>
+
+    <!-- Feedback area -->
+    <div style="margin-top:16px;background:#1a2234;border-radius:10px;padding:16px">
+      <div class="panel-title">💬 Annotation History (This Session)</div>
+      <div id="annotationLog" style="font-size:12px;color:#88aacc;line-height:1.8">
+        ✅ Frame 892 — Corrected: Corrosion → Severe Corrosion (Critical) · +$2.00<br>
+        ✅ Frame 445 — Confirmed: Pipeline Coupling · +$1.50<br>
+        ✅ Frame 1089 — Added missed defect: Anode depletion · +$2.50 (bonus)<br>
+        ✅ Frame 223 — Rejected false positive: Background noise · +$1.00<br>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Annotation Form -->
+  <div class="right-panel">
+    <div class="panel-title">✏️ Annotation Form</div>
+
+    <div class="payment-info">
+      <div class="payment-amount">$2.50</div>
+      <div class="payment-label">Reward for this annotation</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="form-group">
+      <label class="form-label">Does AI detection agree?</label>
+      <div class="agree-bar">
+        <div class="agree-btn btn-agree" onclick="setAgree(true)">✓ Agree</div>
+        <div class="agree-btn btn-disagree" onclick="setAgree(false)">✗ Disagree</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Defect Class</label>
+      <select class="form-select" id="defectClass">
+        <option>Pipeline Leakage</option>
+        <option>Corrosion</option>
+        <option>Biofouling</option>
+        <option>Pipe Coupling Damage</option>
+        <option>Anode Depletion</option>
+        <option>Crack Initiation</option>
+        <option>Structural Anomaly</option>
+        <option>False Positive — No Defect</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Severity Level</label>
+      <div class="severity-grid">
+        <div class="severity-btn sev-low" onclick="setSeverity(this)">LOW</div>
+        <div class="severity-btn sev-moderate" onclick="setSeverity(this)">MODERATE</div>
+        <div class="severity-btn sev-high" onclick="setSeverity(this)">HIGH</div>
+        <div class="severity-btn sev-critical selected" onclick="setSeverity(this)">CRITICAL</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Coverage Estimate (%)</label>
+      <input type="range" min="0" max="100" value="35" style="width:100%;accent-color:#00aaff" oninput="updateCoverage(this.value)">
+      <div style="font-size:12px;color:#00aaff;margin-top:4px" id="coverageVal">Coverage: 35%</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Expert Notes</label>
+      <textarea class="form-textarea" placeholder="Add technical observations, measurement estimates, recommended action...">Visible liquid seepage at pipe joint. Consistent with pressure differential leak pattern. Recommend immediate ROV re-inspection.</textarea>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Confidence in your annotation</label>
+      <select class="form-select">
+        <option>Very Confident (95%+)</option>
+        <option>Confident (80-95%)</option>
+        <option>Moderate (60-80%)</option>
+        <option>Unsure — needs 2nd opinion</option>
+      </select>
+    </div>
+
+    <button class="submit-btn" onclick="submitAnnotation()">✅ Submit Annotation (+$2.50)</button>
+
+    <div class="divider"></div>
+
+    <div class="panel-title">🏆 Leaderboard</div>
+    <div class="leaderboard-item">
+      <div class="rank rank-1">1</div>
+      <div class="lb-name">Capt. R. Sharma<br><span style="font-size:10px;color:#88aacc">ABS Surveyor · Singapore</span></div>
+      <div class="lb-score">$2,847</div>
+    </div>
+    <div class="leaderboard-item">
+      <div class="rank rank-2">2</div>
+      <div class="lb-name">Dr. T. Nakamura<br><span style="font-size:10px;color:#88aacc">Marine Engineer · Tokyo</span></div>
+      <div class="lb-score">$2,341</div>
+    </div>
+    <div class="leaderboard-item">
+      <div class="rank rank-3">3</div>
+      <div class="lb-name">Eng. S. Patel<br><span style="font-size:10px;color:#88aacc">DNV Inspector · Mumbai</span></div>
+      <div class="lb-score">$1,923</div>
+    </div>
+    <div class="leaderboard-item">
+      <div class="rank rank-n">12</div>
+      <div class="lb-name">You (Aishwarya)<br><span style="font-size:10px;color:#88aacc">NautiCAI Intern · Singapore</span></div>
+      <div class="lb-score" style="color:#00aaff">$47.50</div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="progress-ring">
+      <div style="font-size:13px;font-weight:700;color:#e0e6f0">Daily Goal Progress</div>
+      <div class="progress-bar-outer"><div class="progress-bar-inner" style="width:72%"></div></div>
+      <div class="progress-label">18 / 25 annotations · $47.50 / $65.00</div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+@keyframes float {
+  0%, 100% { transform: translateY(0); opacity: 0.6; }
+  50% { transform: translateY(-15px); opacity: 1; }
+}
+</style>
+
+<script>
+let selectedSeverity = 'CRITICAL';
+let agreeStatus = null;
+let annotationCount = 18;
+let totalEarnings = 47.50;
+
+function selectItem(el, title, conf) {
+  document.querySelectorAll('.queue-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('imageTitle').textContent = `Frame — ${title} Detection · Singapore Strait`;
+  document.querySelector('.ai-badge').textContent = `AI: ${conf} confidence`;
+}
+
+function setTool(btn, tool) {
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function setSeverity(btn) {
+  document.querySelectorAll('.severity-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  selectedSeverity = btn.textContent;
+}
+
+function setAgree(agree) {
+  agreeStatus = agree;
+  document.querySelectorAll('.agree-btn').forEach(b => b.style.opacity = '0.5');
+  event.target.style.opacity = '1';
+  event.target.style.transform = 'scale(1.05)';
+}
+
+function updateCoverage(val) {
+  document.getElementById('coverageVal').textContent = `Coverage: ${val}%`;
+}
+
+function clearAnnotations() {
+  alert('Annotations cleared!');
+}
+
+function navigate(dir) {
+  const frameNum = 1247 + dir * 100;
+  document.getElementById('imageTitle').textContent = `Frame ${frameNum} — Pipeline Inspection · Singapore Strait`;
+}
+
+function submitAnnotation() {
+  annotationCount++;
+  totalEarnings += 2.50;
+  document.querySelector('.earnings').textContent = `💰 $${totalEarnings.toFixed(2)} earned today`;
+
+  const log = document.getElementById('annotationLog');
+  const defectClass = document.getElementById('defectClass').value;
+  log.innerHTML = `✅ Frame 1247 — Annotated: ${defectClass} (${selectedSeverity}) · +$2.50<br>` + log.innerHTML;
+
+  const btn = document.querySelector('.submit-btn');
+  btn.textContent = '✅ Submitted! Loading next...';
+  btn.style.background = 'linear-gradient(135deg, #00cc66, #00ff88)';
+  setTimeout(() => {
+    btn.textContent = '✅ Submit Annotation (+$2.50)';
+    btn.style.background = 'linear-gradient(135deg, #0066cc, #00aaff)';
+  }, 2000);
+}
+</script>
+</body>
+</html>

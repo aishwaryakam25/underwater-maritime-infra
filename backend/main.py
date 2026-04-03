@@ -3,14 +3,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 from pdf_report import build_pdf, build_batch_pdf
 """
-NautiCAI — FastAPI Backend
-Serves the detection engine, visibility enhancement, PDF report, and heatmap APIs.
+NautiCAI - FastAPI Backend
 Run: uvicorn backend.main:app --reload --port 8000
 """
 import io, os, sys, uuid, datetime, base64, tempfile, csv
 from pathlib import Path
 
-# Load .env from backend folder so TWILIO_* and NAUTICAI_BASE_URL work without setting in shell
 _env_file = Path(__file__).resolve().parent / ".env"
 if _env_file.exists():
     try:
@@ -25,8 +23,8 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from PIL import Image
 
-# Add parent dir so imports work when running from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from severity import compute_risk, score_to_grade
 from visibility import full_enhance, pil_to_cv, cv_to_pil, apply_clahe, apply_green_water, apply_turbidity, apply_edge_estimator
@@ -35,17 +33,15 @@ from detection import (
     AVAILABLE_MODELS, MODEL_DESCRIPTIONS, set_active_model, get_active_model_key
 )
 
-# Also make app/pdf_report.py importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 from pdf_report import build_pdf, build_batch_pdf
 
 app = FastAPI(
     title="NautiCAI API",
-    description="Underwater Infrastructure Inspection Copilot — API",
-    version="1.0.5",
+    description="Underwater Infrastructure Inspection Copilot - API",
+    version="1.0.6",
 )
 
-# Allow React dev server and deployed frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -54,7 +50,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Batch PDF Report Endpoint ─────────────────────────────────────────────
+# Innovation Routes
+try:
+    from innovation_routes import router as innovation_router
+    app.include_router(innovation_router)
+    print("Innovation routes loaded!")
+except ImportError as e:
+    print(f"Innovation routes not loaded: {e}")
+
+_signups_file = Path(__file__).resolve().parent / "signups.json"
+_report_downloads = {}
+
 from typing import List, Optional
 
 @app.post("/api/report/pdf/batch")
@@ -113,6 +119,7 @@ async def report_pdf_batch(
         headers={"Content-Disposition": 'attachment; filename="NautiCAI_Batch_Report.pdf"'},
     )
 
+
 def _store_signup(data: dict):
     try:
         import json
@@ -123,6 +130,7 @@ def _store_signup(data: dict):
         _signups_file.write_text(json.dumps(existing, indent=2))
     except Exception:
         pass
+
 
 def _send_whatsapp(to: str, body: str, media_url: str = None) -> dict:
     sid = os.environ.get("TWILIO_ACCOUNT_SID")
@@ -146,37 +154,35 @@ def _send_whatsapp(to: str, body: str, media_url: str = None) -> dict:
         return {"sent": False, "message": str(e)}
 
 
-# ── Startup ───────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
     load_yolo()
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────
 def _pil_to_b64(img: Image.Image, fmt="PNG") -> str:
     buf = io.BytesIO()
     img.save(buf, format=fmt)
     return base64.b64encode(buf.getvalue()).decode()
 
+
 def _read_upload(file: UploadFile) -> Image.Image:
     return Image.open(io.BytesIO(file.file.read())).convert("RGB")
+
 
 def _b64_to_pil(b64: str) -> Image.Image:
     return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
 
 
-# ── Model Management ──────────────────────────────────────────────────────
 @app.get("/api/models")
 async def list_models():
-    """List all available models."""
     return {
         "active": get_active_model_key(),
         "available": {k: MODEL_DESCRIPTIONS.get(k, k) for k in AVAILABLE_MODELS}
     }
 
+
 @app.post("/api/models/switch")
 async def switch_model(model_key: str = Form(...)):
-    """Switch active detection model."""
     if model_key not in AVAILABLE_MODELS:
         return JSONResponse({"error": f"Model {model_key} not found"}, status_code=404)
     set_active_model(model_key)
@@ -188,7 +194,6 @@ async def switch_model(model_key: str = Form(...)):
     }
 
 
-# ── Routes ────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():
     model_name = get_model_name()
@@ -196,7 +201,7 @@ async def health():
         "status": "ok",
         "model": model_name,
         "active_model": get_active_model_key(),
-        "version": "1.0.5"
+        "version": "1.0.6"
     }
 
 
@@ -239,7 +244,6 @@ async def detect(
             dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 3]
         elif sev_filter == "Medium+":
             dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 2]
-
         annotated = annotate_image(enhanced, dets)
         heatmap = build_heatmap(enhanced, dets)
         risk = compute_risk(dets)
@@ -249,7 +253,6 @@ async def detect(
         sev_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
         for d in dets:
             sev_counts[d.get("severity", "Medium")] += 1
-
         return {
             "mission_id": mission_id,
             "scan_time": scan_time,
@@ -335,8 +338,6 @@ async def generate_pdf(
         dets, pil_img, annotated, heatmap,
         risk, grade, conf_thr, iou_thr,
     )
-    if (pwd := (pdf_password or "").strip()):
-        pdf_bytes = _encrypt_pdf(pdf_bytes, pwd)
     filename = f"NautiCAI_Report_{mission_id}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
@@ -480,8 +481,6 @@ async def generate_pdf_video(
         all_dets, first_enhanced, first_annotated, heatmap,
         risk, grade, conf_thr, iou_thr,
     )
-    if (pwd := (pdf_password or "").strip()):
-        pdf_bytes = _encrypt_pdf(pdf_bytes, pwd)
     filename = f"NautiCAI_Video_Report_{mission_id}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
@@ -490,12 +489,12 @@ async def generate_pdf_video(
     )
 
 
-# ── Signup ────────────────────────────────────────────────────────────────
 class SignupBody(BaseModel):
     name: str
     email: str
     whatsapp: str = ""
     alerts_whatsapp: bool = False
+
 
 @app.post("/api/signup")
 async def signup(body: SignupBody):
@@ -505,13 +504,13 @@ async def signup(body: SignupBody):
         "whatsapp": body.whatsapp,
         "alerts_whatsapp": body.alerts_whatsapp,
     })
-    return {"ok": True, "message": "Signed up. Redirecting to demo…"}
+    return {"ok": True, "message": "Signed up. Redirecting to demo..."}
 
 
-# ── WhatsApp ──────────────────────────────────────────────────────────────
 class WhatsAppSendBody(BaseModel):
     to: str
     message: str
+
 
 @app.post("/api/whatsapp/send")
 async def whatsapp_send(body: WhatsAppSendBody):
@@ -526,9 +525,9 @@ def _normalize_phone(phone: str) -> str:
     return p
 
 
-# ── Export CSV ────────────────────────────────────────────────────────────
 class ExportDetectionsBody(BaseModel):
     detections: list = []
+
 
 @app.post("/api/export/csv")
 async def export_detections_csv(body: ExportDetectionsBody):
@@ -585,13 +584,11 @@ async def detect_batch(
     corr_turb: bool = Form(True),
     marine_snow: bool = Form(False),
 ):
-    """Run detection on multiple images at once. Returns results per image + combined summary."""
     SEV_RANK = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
     results = []
     all_dets = []
     mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
     scan_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-
     for i, file in enumerate(files):
         try:
             pil_img = _read_upload(file)
@@ -606,14 +603,12 @@ async def detect_batch(
                 marine_snow=marine_snow,
             )
             dets = run_detection(enhanced, conf_thr, iou_thr, mode)
-
             if sev_filter == "Critical Only":
                 dets = [d for d in dets if d["severity"] == "Critical"]
             elif sev_filter == "High+":
                 dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 3]
             elif sev_filter == "Medium+":
                 dets = [d for d in dets if SEV_RANK.get(d["severity"], 0) >= 2]
-
             annotated = annotate_image(enhanced, dets)
             risk = compute_risk(dets)
             grade = score_to_grade(risk)
@@ -621,7 +616,6 @@ async def detect_batch(
             for d in dets:
                 sev_counts[d.get("severity", "Medium")] += 1
             all_dets.extend(dets)
-
             results.append({
                 "image_index": i,
                 "filename": file.filename or f"image_{i+1}",
@@ -638,13 +632,11 @@ async def detect_batch(
                 "filename": file.filename or f"image_{i+1}",
                 "error": str(e),
             })
-
     total_risk = compute_risk(all_dets)
     total_grade = score_to_grade(total_risk)
     total_sev = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
     for d in all_dets:
         total_sev[d.get("severity", "Medium")] += 1
-
     return {
         "mission_id": mission_id,
         "scan_time": scan_time,
@@ -666,15 +658,12 @@ async def detect_3d(
     iou_thr: float = Form(0.45),
     pipeline_length: float = Form(100.0),
 ):
-    """Run YOLO detection and return 3D twin mapping data."""
     pil_img = _read_upload(file)
     enhanced = full_enhance(pil_img, use_clahe=True, use_green=True,
                             turb_in=0.0, corr_turb=True, use_edge=False,
                             clahe_clip=3.0, marine_snow=False)
     dets = run_detection(enhanced, conf_thr, iou_thr, "pipeline")
     W, H = enhanced.size
-
-    # Map detections to 3D pipeline coordinates
     twin_defects = []
     for d in dets:
         cx = (d["x1"] + d["x2"]) / 2
@@ -691,11 +680,9 @@ async def detect_3d(
             "x1": d["x1"], "y1": d["y1"],
             "x2": d["x2"], "y2": d["y2"],
         })
-
     risk = compute_risk(dets)
     grade = score_to_grade(risk)
     mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
-
     return {
         "mission_id": mission_id,
         "total_defects": len(dets),
@@ -748,21 +735,14 @@ async def pdf_send_whatsapp(
         dets, pil_img, annotated, heatmap,
         risk, grade, conf_thr, iou_thr,
     )
-    pwd = (pdf_password or "").strip()
-    if pwd:
-        pdf_bytes = _encrypt_pdf(pdf_bytes, pwd)
     rid = uuid.uuid4().hex[:12]
     _report_downloads[rid] = (pdf_bytes, datetime.datetime.now(), None)
     base_url = os.environ.get("NAUTICAI_BASE_URL", "").rstrip("/")
     download_url = f"{base_url}/api/report/download/{rid}" if base_url else None
     phone = _normalize_phone(to)
     body_text = f"NautiCAI inspection report {mission_id} is ready. Download: {download_url}"
-    if pwd:
-        body_text += f"\nPassword to open PDF: {pwd}"
     if not download_url:
         body_text = f"NautiCAI report {mission_id} generated."
-        if pwd:
-            body_text += f" Password to open PDF: {pwd}"
     result = _send_whatsapp(phone, body_text, media_url=download_url if download_url else None)
     result["download_url"] = download_url
     return result

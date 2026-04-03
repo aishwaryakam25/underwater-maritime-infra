@@ -38,6 +38,20 @@ merged_dataset_v2.zip
 *.swo
 *~
 .project
+
+# --- Large Media Files ---
+*.mp4
+*.png
+*.svg
+
+# --- Frontend Public Assets ---
+frontend/public/ocean-bg.mp4
+frontend/public/nauticai-og.png
+frontend/public/nauticai-logo.png
+frontend/public/nauticai-logo.svg
+
+# --- Website Assets ---
+website/favicon.png
  
 # ─── Large Archives / Zips ──────────────────────────────────────
 archive.zip
