@@ -1,0 +1,35 @@
+# Ship hull defect taxonomy — use for YOLO training (adjust path/train/val).
+# Class ids match backend/defect_taxonomy.py ship-hull categories (flat order).
+
+path: .
+train: images/train
+val: images/val
+
+nc: 26
+names:
+  0: corrosion
+  1: pitting_corrosion
+  2: galvanic_corrosion
+  3: stray_current_corrosion
+  4: crack
+  5: hull_deformation
+  6: dent
+  7: plate_buckling
+  8: weld_defect
+  9: coating_damage
+  10: paint_peeling
+  11: blistering
+  12: coating_erosion
+  13: biofouling_light
+  14: biofouling_heavy
+  15: barnacles
+  16: algae
+  17: mussels
+  18: slime_layer
+  19: anchor_damage
+  20: collision_damage
+  21: grounding_damage
+  22: propeller_damage
+  23: cavitation_damage
+  24: rudder_damage
+  25: thruster_damage

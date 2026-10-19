@@ -145,7 +145,7 @@ export default function MultiPipeline3D({ uploads }) {
       ctx.fillStyle = "#4488aa";
       ctx.font = "14px Segoe UI, monospace";
       if (hasDet) {
-        ctx.fillText("Grade: " + grade + "   Risk: " + risk + "%   Defects: " + total, 12, 52);
+        ctx.fillText("Grade: " + grade + "   Inspection: " + risk + "%   Defects: " + total, 12, 52);
       } else {
         ctx.fillText("Awaiting scan...", 12, 52);
       }

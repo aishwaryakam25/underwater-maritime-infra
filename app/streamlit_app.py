@@ -2,7 +2,7 @@
 NautiCAI — Underwater Infrastructure Inspection Copilot
 Run: streamlit run app/streamlit_app.py
 """
-import io, os, math, time, uuid, datetime, tempfile
+import io, os, sys, math, time, uuid, datetime, tempfile
 from pathlib import Path
 import cv2, numpy as np
 import streamlit as st
@@ -24,18 +24,46 @@ from huggingface_hub import hf_hub_download
 
 ROOT = Path(__file__).resolve().parent.parent
 APP  = Path(__file__).resolve().parent
+_BACKEND = ROOT / "backend"
+if str(_BACKEND) not in sys.path:
+    sys.path.insert(0, str(_BACKEND))
 
-# Auto-download model from Hugging Face
-if not os.path.exists(ROOT / "best.pt"):
-    print("Downloading model from Hugging Face...")
+from inspection_provenance import collect_inspection_provenance
+
+def _has_any_local_weights() -> bool:
+    try:
+        w = ROOT / "weights"
+        return w.exists() and any(w.glob("*.pt"))
+    except Exception:
+        return False
+
+
+# Auto-download a demo model only if you have no local weights.
+if (not _has_any_local_weights()) and (not os.path.exists(ROOT / "best.pt")):
+    print("Downloading demo model from Hugging Face...")
     hf_hub_download(
         repo_id="aishwarya252525/nauticai-yolov8",
         filename="best.pt",
         local_dir=str(ROOT),
-        local_dir_use_symlinks=False
+        local_dir_use_symlinks=False,
     )
 
 def _find_model():
+    # Prefer repo `weights/` if present (matches backend convention).
+    w = ROOT / "weights"
+    if w.exists():
+        for n in [
+            "best_hull_taxonomy.pt",
+            "best_subsea_taxonomy.pt",
+            "best_official_19.pt",
+            "best_archive.pt",
+            "best_merged_original.pt",
+            "best_subpipe_full.pt",
+            "best.pt",
+        ]:
+            p = w / n
+            if p.exists():
+                return p
     for n in ["best.pt","yolov8s.pt","yolov8n.pt"]:
         p = ROOT/n
         if p.exists(): return p
@@ -853,8 +881,26 @@ with tab_hull:
                     hull_pdf_bytes=build_pdf(
                         hull_mid,
                         vessel_name or "Unknown",
-                        inspector, "hull", hd, h_img, ha, hull_hmap,
-                        rh, gh, conf_thr, iou_thr
+                        inspector, "hull", hd, h_img, enh, ha, hull_hmap,
+                        rh, gh, conf_thr, iou_thr,
+                        model_name=MODEL_PATH.name if MODEL_PATH else None,
+                        provenance=collect_inspection_provenance(
+                            mission_id=hull_mid,
+                            mode="hull",
+                            conf_thr=conf_thr,
+                            iou_thr=iou_thr,
+                            use_clahe=use_clahe,
+                            clahe_clip=clahe_clip,
+                            use_green=use_green,
+                            use_edge=use_edge,
+                            turbidity_in=turbidity_in,
+                            corr_turb=corr_turb,
+                            marine_snow=marine_snow,
+                            sev_filter="All Detections",
+                            weights_path_override=MODEL_PATH,
+                            model_key_override="streamlit_app",
+                            model_display_override=MODEL_PATH.name if MODEL_PATH else "Demo",
+                        ),
                     )
                     st.session_state.hull_pdf=hull_pdf_bytes
                     st.session_state.hull_pdf_fname=(
@@ -1029,8 +1075,26 @@ with tab_pipe:
                     pipe_pdf_bytes=build_pdf(
                         pipe_mid,
                         vessel_name or "Unknown",
-                        inspector, "pipeline", pd_, p_img, pa, pipe_hmap,
-                        rp, gp, conf_thr, iou_thr
+                        inspector, "pipeline", pd_, p_img, pe, pa, pipe_hmap,
+                        rp, gp, conf_thr, iou_thr,
+                        model_name=MODEL_PATH.name if MODEL_PATH else None,
+                        provenance=collect_inspection_provenance(
+                            mission_id=pipe_mid,
+                            mode="pipeline",
+                            conf_thr=conf_thr,
+                            iou_thr=iou_thr,
+                            use_clahe=use_clahe,
+                            clahe_clip=clahe_clip,
+                            use_green=use_green,
+                            use_edge=use_edge,
+                            turbidity_in=turbidity_in,
+                            corr_turb=corr_turb,
+                            marine_snow=marine_snow,
+                            sev_filter="All Detections",
+                            weights_path_override=MODEL_PATH,
+                            model_key_override="streamlit_app",
+                            model_display_override=MODEL_PATH.name if MODEL_PATH else "Demo",
+                        ),
                     )
                     st.session_state.pipe_pdf=pipe_pdf_bytes
                     st.session_state.pipe_pdf_fname=(
@@ -1104,8 +1168,26 @@ with tab_cable:
                     cable_pdf_bytes=build_pdf(
                         cable_mid,
                         vessel_name or "Unknown",
-                        inspector, "cable", cd, c_img, ca, cable_hmap,
-                        rc, gc, conf_thr, iou_thr
+                        inspector, "cable", cd, c_img, ce, ca, cable_hmap,
+                        rc, gc, conf_thr, iou_thr,
+                        model_name=MODEL_PATH.name if MODEL_PATH else None,
+                        provenance=collect_inspection_provenance(
+                            mission_id=cable_mid,
+                            mode="cable",
+                            conf_thr=conf_thr,
+                            iou_thr=iou_thr,
+                            use_clahe=use_clahe,
+                            clahe_clip=clahe_clip,
+                            use_green=use_green,
+                            use_edge=True,
+                            turbidity_in=turbidity_in,
+                            corr_turb=corr_turb,
+                            marine_snow=marine_snow,
+                            sev_filter="All Detections",
+                            weights_path_override=MODEL_PATH,
+                            model_key_override="streamlit_app",
+                            model_display_override=MODEL_PATH.name if MODEL_PATH else "Demo",
+                        ),
                     )
                     st.session_state.cable_pdf=cable_pdf_bytes
                     st.session_state.cable_pdf_fname=(
@@ -1221,8 +1303,26 @@ with tab_report:
                     pdf_bytes=build_pdf(
                         st.session_state.mission_id,
                         st.session_state.vessel_name or "Unknown",
-                        inspector, scan_mode, dets, orig, ann, hmap,
-                        risk, grade, conf_thr, iou_thr
+                        inspector, scan_mode, dets, orig, enh, ann, hmap,
+                        risk, grade, conf_thr, iou_thr,
+                        model_name=MODEL_PATH.name if MODEL_PATH else None,
+                        provenance=collect_inspection_provenance(
+                            mission_id=st.session_state.mission_id,
+                            mode=scan_mode,
+                            conf_thr=conf_thr,
+                            iou_thr=iou_thr,
+                            use_clahe=use_clahe,
+                            clahe_clip=clahe_clip,
+                            use_green=use_green,
+                            use_edge=use_edge,
+                            turbidity_in=turbidity_in,
+                            corr_turb=corr_turb,
+                            marine_snow=marine_snow,
+                            sev_filter="All Detections",
+                            weights_path_override=MODEL_PATH,
+                            model_key_override="streamlit_app",
+                            model_display_override=MODEL_PATH.name if MODEL_PATH else "Demo",
+                        ),
                     )
                     st.session_state.last_pdf=pdf_bytes
                     st.session_state.last_pdf_fname=(

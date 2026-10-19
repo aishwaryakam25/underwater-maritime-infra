@@ -1,4 +1,13 @@
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import List
+import io
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 router = APIRouter(prefix="/api/innovation", tags=["Innovation"])
 
@@ -12,7 +21,12 @@ async def weld_inspect(
     """Underwater weld anomaly detection from ROV image."""
     try:
         import uuid, datetime
-        from detection import run_detection, annotate_image
+        from detection import (
+            run_detection,
+            annotate_image,
+            split_asset_and_defects,
+            boxes_for_visualization,
+        )
         from visibility import full_enhance
         from severity import compute_risk, score_to_grade
         from PIL import Image
@@ -24,9 +38,12 @@ async def weld_inspect(
             turb_in=0.0, corr_turb=True, use_edge=True, clahe_clip=3.0, marine_snow=False)
 
         dets = run_detection(enhanced, 0.25, 0.45, "general")
+        assets, defects = split_asset_and_defects(dets, "general")
 
         buf = io.BytesIO()
-        annotated_img = annotate_image(enhanced, dets)
+        annotated_img = annotate_image(
+            enhanced, boxes_for_visualization(assets, defects, "general"), mode="general",
+        )
         annotated_img.save(buf, format="PNG")
         annotated_b64 = base64.b64encode(buf.getvalue()).decode()
 
@@ -107,16 +124,7 @@ async def weld_inspect(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import List
-import io, sys, tempfile
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-router = APIRouter(prefix="/api/innovation", tags=["Innovation"])
 
 class ABSReportRequest(BaseModel):
     vessel_name: str = "MV Pacific Explorer"
@@ -335,180 +343,180 @@ async def innovation_summary():
     ], "total_features": 8, "platform": "NautiCAI Innovation Suite v1.0"}
 
 
-    # --- Master endpoint for full inspection report ---
-    
-    @router.post("/full-inspection-report")
-    async def full_inspection_report(
-        file: UploadFile = File(...),
-        vessel_name: str = Form("MV Pacific Explorer"),
-        vessel_imo: str = Form("IMO 9876543"),
-        inspector: str = Form("NautiCAI Automated System"),
-        vessel_type: str = Form("Container Ship"),
-        dwt_tonnes: int = Form(50000),
-        route_km: int = Form(15000),
-        fuel_type: str = Form("HFO"),
-        lat: float = Form(1.2),
-        lon: float = Form(103.8),
-        conf_thr: float = Form(0.25),
-        report_type: str = Form("abs_dnv"),
-    ):
-        """
-        Upload one image → real YOLOv8 detection → generate any PDF report with real data.
-        report_type options: abs_dnv, biofouling_co2, blockchain, environmental_risk, corrosion_velocity
-        """
-        try:
-            from detection import run_detection, annotate_image
-            from visibility import full_enhance
-            from severity import compute_risk, score_to_grade
-            from PIL import Image
-            import io, uuid, datetime, base64, tempfile
+# --- Master endpoint for full inspection report ---
 
-            # Step 1: Read and detect
-            img_bytes = await file.read()
-            pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-            enhanced = full_enhance(pil_img, use_clahe=True, use_green=True,
-                turb_in=0.0, corr_turb=True, use_edge=False, clahe_clip=3.0, marine_snow=False)
-            dets = run_detection(enhanced, conf_thr, 0.45, "general")
-            risk = compute_risk(dets)
-            grade = score_to_grade(risk)
-            mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
+@router.post("/full-inspection-report")
+async def full_inspection_report(
+    file: UploadFile = File(...),
+    vessel_name: str = Form("MV Pacific Explorer"),
+    vessel_imo: str = Form("IMO 9876543"),
+    inspector: str = Form("NautiCAI Automated System"),
+    vessel_type: str = Form("Container Ship"),
+    dwt_tonnes: int = Form(50000),
+    route_km: int = Form(15000),
+    fuel_type: str = Form("HFO"),
+    lat: float = Form(1.2),
+    lon: float = Form(103.8),
+    conf_thr: float = Form(0.25),
+    report_type: str = Form("abs_dnv"),
+):
+    """
+    Upload one image → real YOLOv8 detection → generate any PDF report with real data.
+    report_type options: abs_dnv, biofouling_co2, blockchain, environmental_risk, corrosion_velocity
+    """
+    try:
+        from detection import run_detection, annotate_image
+        from visibility import full_enhance
+        from severity import compute_risk, score_to_grade
+        from PIL import Image
+        import io, uuid, datetime, base64, tempfile
 
-            # Step 2: Convert to report format
-            action_map = {
-                "Critical": "Immediate repair required — stop operation",
-                "High": "Repair within 7 days",
-                "Medium": "Schedule repair within 30 days",
-                "Low": "Monitor at next inspection"
-            }
-            biofouling_coverage = 0
-            report_detections = []
-            for d in dets:
-                sev = d.get("severity", "Low")
-                cls = d.get("cls", d.get("class", "Unknown"))
-                conf = d.get("conf", 0.5)
-                if "biofouling" in cls.lower() or "fouling" in cls.lower():
-                    biofouling_coverage += 15
-                report_detections.append({
-                    "class": cls,
-                    "location": f"Frame ({d.get('x1',0):.0f},{d.get('y1',0):.0f}) - ({d.get('x2',0):.0f},{d.get('y2',0):.0f})",
-                    "confidence": round(conf, 2),
-                    "severity": sev,
-                    "action": action_map.get(sev, "Monitor")
-                })
+        # Step 1: Read and detect
+        img_bytes = await file.read()
+        pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        enhanced = full_enhance(pil_img, use_clahe=True, use_green=True,
+            turb_in=0.0, corr_turb=True, use_edge=False, clahe_clip=3.0, marine_snow=False)
+        dets = run_detection(enhanced, conf_thr, 0.45, "general")
+        risk = compute_risk(dets)
+        grade = score_to_grade(risk)
+        mission_id = f"M-{uuid.uuid4().hex[:6].upper()}"
 
-            biofouling_coverage = min(biofouling_coverage, 90)
-            if biofouling_coverage == 0:
-                biofouling_coverage = 25  # default if no biofouling detected
-            severity_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
-            for d in dets:
-                severity_counts[d.get("severity", "Low")] += 1
-            if severity_counts["Critical"] > 0:
-                biofouling_severity = "Heavy"
-            elif severity_counts["High"] > 0:
-                biofouling_severity = "Medium"
-            else:
-                biofouling_severity = "Light"
+        # Step 2: Convert to report format
+        action_map = {
+            "Critical": "Immediate repair required — stop operation",
+            "High": "Repair within 7 days",
+            "Medium": "Schedule repair within 30 days",
+            "Low": "Monitor at next inspection"
+        }
+        biofouling_coverage = 0
+        report_detections = []
+        for d in dets:
+            sev = d.get("severity", "Low")
+            cls = d.get("cls", d.get("class", "Unknown"))
+            conf = d.get("conf", 0.5)
+            if "biofouling" in cls.lower() or "fouling" in cls.lower():
+                biofouling_coverage += 15
+            report_detections.append({
+                "class": cls,
+                "location": f"Frame ({d.get('x1',0):.0f},{d.get('y1',0):.0f}) - ({d.get('x2',0):.0f},{d.get('y2',0):.0f})",
+                "confidence": round(conf, 2),
+                "severity": sev,
+                "action": action_map.get(sev, "Monitor")
+            })
 
-            output_path = tempfile.mktemp(suffix=".pdf")
+        biofouling_coverage = min(biofouling_coverage, 90)
+        if biofouling_coverage == 0:
+            biofouling_coverage = 25  # default if no biofouling detected
+        severity_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+        for d in dets:
+            severity_counts[d.get("severity", "Low")] += 1
+        if severity_counts["Critical"] > 0:
+            biofouling_severity = "Heavy"
+        elif severity_counts["High"] > 0:
+            biofouling_severity = "Medium"
+        else:
+            biofouling_severity = "Light"
 
-            # Step 3: Generate requested PDF
-            if report_type == "abs_dnv":
-                from abs_report_generator import generate_abs_report
-                if not report_detections:
-                    report_detections = [{
-                        "class": "No defects detected",
-                        "location": "Full frame",
-                        "confidence": 0.99,
-                        "severity": "Low",
-                        "action": "No action required"
-                    }]
-                generate_abs_report(
-                    vessel_name=vessel_name,
-                    vessel_imo=vessel_imo,
-                    inspector=inspector,
-                    detections=report_detections,
-                    output_path=output_path
-                )
-                filename = f"ABS_DNV_{mission_id}.pdf"
+        output_path = tempfile.mktemp(suffix=".pdf")
 
-            elif report_type == "biofouling_co2":
-                from biofouling_co2_calculator import calculate_biofouling_impact
-                calculate_biofouling_impact(
-                    vessel_name=vessel_name,
-                    vessel_imo=vessel_imo,
-                    vessel_type=vessel_type,
-                    dwt_tonnes=dwt_tonnes,
-                    route_km=route_km,
-                    fuel_type=fuel_type,
-                    biofouling_coverage_percent=biofouling_coverage,
-                    biofouling_severity=biofouling_severity,
-                    output_path=output_path
-                )
-                filename = f"Biofouling_CO2_{mission_id}.pdf"
-
-            elif report_type == "blockchain":
-                from blockchain_audit import InspectionBlockchain
-                bc = InspectionBlockchain()
-                bc.add_inspection_record(
-                    vessel_name=vessel_name,
-                    vessel_imo=vessel_imo,
-                    inspector=inspector,
-                    location=f"{lat}N, {lon}E",
-                    detections=report_detections
-                )
-                bc.generate_audit_report(output_path)
-                filename = f"Blockchain_Audit_{mission_id}.pdf"
-
-            elif report_type == "environmental_risk":
-                from environmental_risk_scoring import generate_risk_report
-                generate_risk_report(
-                    vessel_name=vessel_name,
-                    vessel_imo=vessel_imo,
-                    lat=lat,
-                    lon=lon,
-                    location_name="Singapore Strait",
-                    output_path=output_path
-                )
-                filename = f"Environmental_Risk_{mission_id}.pdf"
-
-            elif report_type == "corrosion_velocity":
-                from corrosion_velocity_model import generate_inspection_history, predict_failure, generate_corrosion_report
-                asset_ids = [f"{vessel_imo}-Zone-{i+1}" for i in range(3)]
-                assets = []
-                for asset_id in asset_ids:
-                    history = generate_inspection_history(asset_id)
-                    # Inject real detection data into history
-                    if report_detections:
-                        history[-1]['corrosion_mm'] += len([d for d in report_detections if d['severity'] in ['Critical', 'High']]) * 1.5
-                    model_cv, poly, future_days, future_corrosion, days_remaining, months_remaining = predict_failure(history)
-                    assets.append({
-                        "id": asset_id,
-                        "history": history,
-                        "future_days": future_days,
-                        "future_corrosion": future_corrosion,
-                        "days_remaining": days_remaining,
-                        "months_remaining": months_remaining
-                    })
-                generate_corrosion_report(assets, output_path)
-                filename = f"Corrosion_Velocity_{mission_id}.pdf"
-
-            else:
-                raise HTTPException(status_code=400, detail=f"Unknown report_type: {report_type}")
-
-            with open(output_path, 'rb') as f:
-                pdf_bytes = f.read()
-
-            return StreamingResponse(
-                io.BytesIO(pdf_bytes),
-                media_type="application/pdf",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"',
-                    "X-Mission-ID": mission_id,
-                    "X-Total-Detections": str(len(dets)),
-                    "X-Risk-Score": str(risk),
-                    "X-Grade": grade
-                }
+        # Step 3: Generate requested PDF
+        if report_type == "abs_dnv":
+            from abs_report_generator import generate_abs_report
+            if not report_detections:
+                report_detections = [{
+                    "class": "No defects detected",
+                    "location": "Full frame",
+                    "confidence": 0.99,
+                    "severity": "Low",
+                    "action": "No action required"
+                }]
+            generate_abs_report(
+                vessel_name=vessel_name,
+                vessel_imo=vessel_imo,
+                inspector=inspector,
+                detections=report_detections,
+                output_path=output_path
             )
+            filename = f"ABS_DNV_{mission_id}.pdf"
 
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        elif report_type == "biofouling_co2":
+            from biofouling_co2_calculator import calculate_biofouling_impact
+            calculate_biofouling_impact(
+                vessel_name=vessel_name,
+                vessel_imo=vessel_imo,
+                vessel_type=vessel_type,
+                dwt_tonnes=dwt_tonnes,
+                route_km=route_km,
+                fuel_type=fuel_type,
+                biofouling_coverage_percent=biofouling_coverage,
+                biofouling_severity=biofouling_severity,
+                output_path=output_path
+            )
+            filename = f"Biofouling_CO2_{mission_id}.pdf"
+
+        elif report_type == "blockchain":
+            from blockchain_audit import InspectionBlockchain
+            bc = InspectionBlockchain()
+            bc.add_inspection_record(
+                vessel_name=vessel_name,
+                vessel_imo=vessel_imo,
+                inspector=inspector,
+                location=f"{lat}N, {lon}E",
+                detections=report_detections
+            )
+            bc.generate_audit_report(output_path)
+            filename = f"Blockchain_Audit_{mission_id}.pdf"
+
+        elif report_type == "environmental_risk":
+            from environmental_risk_scoring import generate_risk_report
+            generate_risk_report(
+                vessel_name=vessel_name,
+                vessel_imo=vessel_imo,
+                lat=lat,
+                lon=lon,
+                location_name="Singapore Strait",
+                output_path=output_path
+            )
+            filename = f"Environmental_Risk_{mission_id}.pdf"
+
+        elif report_type == "corrosion_velocity":
+            from corrosion_velocity_model import generate_inspection_history, predict_failure, generate_corrosion_report
+            asset_ids = [f"{vessel_imo}-Zone-{i+1}" for i in range(3)]
+            assets = []
+            for asset_id in asset_ids:
+                history = generate_inspection_history(asset_id)
+                # Inject real detection data into history
+                if report_detections:
+                    history[-1]['corrosion_mm'] += len([d for d in report_detections if d['severity'] in ['Critical', 'High']]) * 1.5
+                model_cv, poly, future_days, future_corrosion, days_remaining, months_remaining = predict_failure(history)
+                assets.append({
+                    "id": asset_id,
+                    "history": history,
+                    "future_days": future_days,
+                    "future_corrosion": future_corrosion,
+                    "days_remaining": days_remaining,
+                    "months_remaining": months_remaining
+                })
+            generate_corrosion_report(assets, output_path)
+            filename = f"Corrosion_Velocity_{mission_id}.pdf"
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown report_type: {report_type}")
+
+        with open(output_path, 'rb') as f:
+            pdf_bytes = f.read()
+
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Mission-ID": mission_id,
+                "X-Total-Detections": str(len(dets)),
+                "X-Risk-Score": str(risk),
+                "X-Grade": grade
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

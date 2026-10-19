@@ -1,6 +1,5 @@
 import { useState, useRef } from "react";
-
-const API = "http://127.0.0.1:8000";
+import { apiUrl } from "./apiConfig";
 
 const SEV_COLOR = {
   PASS: "#00c853",
@@ -44,7 +43,7 @@ export default function WeldInspector() {
       fd.append("file", file);
       fd.append("vessel_name", vesselName);
       fd.append("n_zones", nZones);
-      const res = await fetch(`${API}/api/innovation/weld-inspect`, {
+      const res = await fetch(apiUrl("/api/innovation/weld-inspect"), {
         method: "POST", body: fd,
       });
       if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -72,9 +71,6 @@ export default function WeldInspector() {
             fontSize: 11, color: "#00d4ff", fontWeight: 600
           }}>INDUSTRY FIRST</span>
         </div>
-        <p style={{ margin: 0, fontSize: 13, color: "#8899aa" }}>
-          AI-powered subsea weld defect detection with causal explanations — AWS D1.1 / ISO 5817 compliant
-        </p>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 20 }}>

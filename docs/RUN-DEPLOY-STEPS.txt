@@ -1,0 +1,22 @@
+Run these steps in PowerShell (from this folder). Do them in order.
+You must be logged in to gcloud first: gcloud auth login
+
+STEP 1 - Log in (once)
+  gcloud auth login
+
+STEP 2 - Deploy backend + update website files
+  cd "C:\Users\RAMNATH VENKAT\Documents\nauticai-underwater-anomaly"
+  .\deploy-gcp.ps1 -ProjectId underwater-maritime-infra
+
+  This will: set project, enable APIs, create Artifact Registry, build Docker image,
+  push image, deploy to Cloud Run, set env vars, update website/index.html and
+  website/demo.html with the backend URL. It can take 10-15 minutes (Docker build).
+
+STEP 3 - Deploy website to Firebase (optional, if you use Firebase)
+  firebase deploy --only hosting
+
+  (First time: firebase login, then firebase init hosting with public directory: website)
+
+STEP 4 - Test
+  Open the Cloud Run URL from the script output, then add /api/health
+  Example: https://nauticai-api-xxxxx-uc.a.run.app/api/health

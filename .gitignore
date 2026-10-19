@@ -92,15 +92,27 @@ $RECYCLE.BIN/
 backend/signups.json
 .env
 backend/.env
+backend/.active_model_key
+
+# ─── Large local mirrors (keep out of git) ───────────────────────
+temp_report_images/
+datasets_archive/
+archived/test/
+archived/train/
 
 # ─── Logs / Temp ─────────────────────────────────────────────────
 *.log
 *.tmp
 *.bak
 *.pid
+*.backup
+backend/detection.py.OLD
 
 # ─── Node.js ─────────────────────────────────────────────────────
 node_modules/
 .cache/
 frontend/node_modules/
 frontend/.cache/
+
+# local chat logs
+curs/

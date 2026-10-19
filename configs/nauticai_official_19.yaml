@@ -1,0 +1,29 @@
+# NautiCAI — Official 19 defect classes (Severity Classification table).
+# Use this `names` order when training YOLO so checkpoints align with the app.
+# Replace train/val paths with your dataset layout.
+
+path: .
+train: images/train
+val: images/val
+
+nc: 19
+names:
+  0: Corrosion
+  1: Crack
+  2: Fracture
+  3: Leakage
+  4: Marine Growth
+  5: Biofouling
+  6: Weld Defect
+  7: Anode Damage
+  8: CP Failure
+  9: Pitting
+  10: Paint Damage
+  11: Coating Failure
+  12: Deformation
+  13: Blockage
+  14: Dent
+  15: Scaling
+  16: Spalling
+  17: Disbondment
+  18: Foreign Object

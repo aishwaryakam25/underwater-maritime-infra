@@ -1,11 +1,23 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import React, { useState, useRef, useCallback, useEffect, useMemo, useId } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, BarChart, Bar, Legend } from "recharts";
 import PipelineMap2D from "./PipelineMap2D";
 import MultiPipeline3D from "./MultiPipeline3D";
-import { getHealth, runDetection, runEnhance, downloadBatchPDF, downloadVideoPDF, runVideoDetection, sendPDFToWhatsApp, sendVideoPDFToWhatsApp, sendWhatsAppMessage } from "./api";
+import { runDetection, downloadBatchPDF, downloadVideoPDF, runVideoDetection, downloadAnnotatedVideo } from "./api";
 import WeldInspector from './WeldInspector';
 import SonarAnalysis from './SonarAnalysis';
+import CombinedScan from './CombinedScan';
+import Hull3DPanel from "./Hull3DPanel";
+import { isLikelyImageFile } from "./imageFiles";
+import VideoLiveAnalysis from "./VideoLiveAnalysis";
+
+function formatApiError(e) {
+  const d = e?.response?.data?.detail;
+  if (Array.isArray(d)) {
+    return d.map((x) => (typeof x === "string" ? x : x?.msg || JSON.stringify(x))).join("; ");
+  }
+  if (typeof d === "string") return d;
+  return e?.message || String(e);
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -23,6 +35,7 @@ const TABS = [
   { id: "comply", icon: "📋", label: "Compliance" },
   { id: "zero", icon: "🎯", label: "Zero-Shot" },
   { id: "sonar", icon: "S", label: "Sonar Analysis" },
+  { id: "combined", icon: "◎", label: "Combined" },
   { id: "road", icon: "🗺️", label: "Roadmap" },
 ];
 
@@ -33,7 +46,7 @@ const pgVar = {
 };
 
 const PHASES = [
-  { num: "01", ver: "v1.0", sub: "core", badge: "LIVE", badgeColor: "#22c55e", tagline: "Foundation · Beta", items: ["Single-mission image and video ingestion", "Deep vision anomaly detection for hull, pipeline and cable", "Visibility enhancement (CLAHE, green-water and turbidity filters)", "Severity labels, risk scoring and mission grading", "PDF inspection packs and mission-level dashboard", "Internal pilots with design partners (operator-in-the-loop)"] },
+  { num: "01", ver: "v1.0", sub: "core", badge: "LIVE", badgeColor: "#22c55e", tagline: "Foundation · Beta", items: ["Single-mission image and video ingestion", "Deep vision anomaly detection for hull, pipeline and cable", "Visibility enhancement (CLAHE, green-water and turbidity filters)", "Severity labels, inspection scoring and mission grading", "PDF inspection packs and mission-level dashboard", "Internal pilots with design partners (operator-in-the-loop)"] },
   { num: "02", ver: "v2.0", sub: "scale", badge: "Q3–Q4 2025", badgeColor: "#22d3ee", tagline: "Scale · Reliability", items: ["Production-grade pipeline and cable modules", "Mission analytics: trend views, class heatmaps and severity distributions", "Real-time ROV streaming connector and low-latency inference", "Multi-tenant cloud dashboard with role-based access control (RBAC)", "Customer API and webhooks for CMMS / digital twin integrations", "Hardening, monitoring, alerting and SLA-backed deployments"] },
   { num: "03", ver: "v3.0", sub: "auto", badge: "2026+", badgeColor: "#a855f7", tagline: "Intelligence · Autonomy", items: ["Subsea cable burial-depth estimation and route risk scoring", "3D point-cloud reconstruction and digital twin integration", "Cross-mission degradation tracking and anomaly forecasting", "AI-assisted fleet inspection planning and optimisation engine", "Semi-autonomous ROV guidance and inspection playbooks", "Regulatory-grade compliance reporting and full audit trail"] },
 ];
@@ -126,7 +139,6 @@ function calcDeadlines(det) {
 // ═══════════════════════════════════════════════════════════════════════════
 export default function App() {
   const [tab, setTab] = useState("scan");
-  const [health, setHealth] = useState(null);
   const [tabUploads, setTabUploads] = useState({});
   const uploads = tabUploads[tab] ?? [];
   const [tabSelectedIdx, setTabSelectedIdx] = useState({});
@@ -151,12 +163,11 @@ export default function App() {
   const [error, setError] = useState("");
   const [videoFile, setVideoFile] = useState(null);
   const [videoLoading, setVideoLoading] = useState(false);
+  const [videoPdfLoading, setVideoPdfLoading] = useState(false);
+  const [videoExportLoading, setVideoExportLoading] = useState(false);
   const [videoResult, setVideoResult] = useState(null);
   const [reportsGenerated, setReportsGenerated] = useState(0);
   const [sessionDetections, setSessionDetections] = useState(0);
-  const [sendingWa, setSendingWa] = useState(false);
-  const [waMessage, setWaMessage] = useState("");
-  const [completionAlertSent, setCompletionAlertSent] = useState(false);
   const [privacyCountdown, setPrivacyCountdown] = useState(null);
   const [deletionCert, setDeletionCert] = useState(null);
   const [complianceOpen, setComplianceOpen] = useState(false);
@@ -164,15 +175,33 @@ export default function App() {
   const [zeroShotClasses, setZeroShotClasses] = useState([]);
   const [insp1Sev, setInsp1Sev] = useState("");
   const [insp2Sev, setInsp2Sev] = useState("");
-  const [demoUser] = useState(() => { try { const u = sessionStorage.getItem("nauticai-demo-user"); return u ? JSON.parse(u) : null; } catch { return null; } });
+  const [hullPanelMode, setHullPanelMode] = useState("inspection");
 
   const latestDetResult = useMemo(() => {
     for (const t of ["scan","hull","pipeline","cable"]) { const arr = tabUploads[t] || []; for (let i = arr.length - 1; i >= 0; i--) { if (arr[i]?.detResult) return arr[i].detResult; } }
     return null;
   }, [tabUploads]);
 
-  useEffect(() => { const p = new URLSearchParams(window.location.search); if (p.get("demo")==="1") { const u = { name:p.get("name")||"", email:p.get("email")||"", whatsapp:p.get("whatsapp")||"" }; sessionStorage.setItem("nauticai-demo-access","1"); sessionStorage.setItem("nauticai-demo-user",JSON.stringify(u)); window.history.replaceState({},"",window.location.pathname); } if (sessionStorage.getItem("nauticai-demo-access")!=="1") sessionStorage.setItem("nauticai-demo-access","1"); }, []);
-  useEffect(() => { const poll = () => getHealth().then(setHealth).catch(() => setHealth({ status:"offline" })); poll(); const t = setInterval(poll,30000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("demo") === "1") {
+      const u = { name: p.get("name") || "", email: p.get("email") || "" };
+      sessionStorage.setItem("nauticai-demo-access", "1");
+      sessionStorage.setItem("nauticai-demo-user", JSON.stringify(u));
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    if (sessionStorage.getItem("nauticai-demo-access") !== "1") sessionStorage.setItem("nauticai-demo-access", "1");
+    try {
+      if (sessionStorage.getItem("nauticai-open-hull3d") === "1") {
+        sessionStorage.removeItem("nauticai-open-hull3d");
+        setTab("hull");
+        setHullPanelMode("hull3d");
+      }
+    } catch (_) {}
+  }, []);
+  useEffect(() => {
+    if (tab !== "hull") setHullPanelMode("inspection");
+  }, [tab]);
   useEffect(() => { if (!latestDetResult) return; setPrivacyCountdown(60); setDeletionCert(null); setInsp1Sev(""); setInsp2Sev(""); saveMission(latestDetResult); }, [latestDetResult]);
   useEffect(() => { if (privacyCountdown===null) return; if (privacyCountdown<=0) { const b = new Uint8Array(8); crypto.getRandomValues(b); setDeletionCert({ hash:Array.from(b).map((x)=>x.toString(16).padStart(2,"0")).join("").toUpperCase(), time:new Date().toISOString() }); setPrivacyCountdown(null); return; } const t = setTimeout(()=>setPrivacyCountdown((n)=>n-1),1000); return ()=>clearTimeout(t); }, [privacyCountdown]);
 
@@ -181,7 +210,20 @@ export default function App() {
 
   const fileRef = useRef(), folderRef = useRef(), videoRef = useRef();
   const createUploadItem = (file) => ({ id:makeId(), file, preview:URL.createObjectURL(file), detResult:null, enhResult:null });
-  const handleFiles = useCallback((fileList) => { const valid = Array.from(fileList||[]).filter((f)=>f.type.startsWith("image/")); if (!valid.length) return; const items = valid.map(createUploadItem); setTabUploads((prev)=>({...prev,[tab]:[...(prev[tab]||[]),...items]})); setTabSelectedIdx((prev)=>({...prev,[tab]:(tabUploads[tab]||[]).length>0?(prev[tab]??0):0})); setError(""); setPrivacyCountdown(null); setDeletionCert(null); }, [tab,tabUploads]);
+  const handleFiles = useCallback((fileList) => {
+    const raw = Array.from(fileList || []);
+    const valid = raw.filter(isLikelyImageFile);
+    if (!valid.length) {
+      if (raw.length) setError("No supported images found (empty MIME types are common for folders on Windows — use JPG, PNG, BMP, TIFF, or WebP).");
+      return;
+    }
+    const items = valid.map(createUploadItem);
+    setTabUploads((prev) => ({ ...prev, [tab]: [...(prev[tab] || []), ...items] }));
+    setTabSelectedIdx((prev) => ({ ...prev, [tab]: (tabUploads[tab] || []).length > 0 ? (prev[tab] ?? 0) : 0 }));
+    setError("");
+    setPrivacyCountdown(null);
+    setDeletionCert(null);
+  }, [tab, tabUploads]);
   const updateUploadInTab = useCallback((tabId,id,patch) => { setTabUploads((prev)=>({...prev,[tabId]:(prev[tabId]||[]).map((item)=>item.id===id?{...item,...patch}:item)})); }, []);
   const removeUpload = useCallback((id) => { setTabUploads((prev)=>{ const arr=prev[tab]||[]; const item=arr.find((x)=>x.id===id); if (item?.preview) URL.revokeObjectURL(item.preview); return {...prev,[tab]:arr.filter((x)=>x.id!==id)}; }); setTabSelectedIdx((prev)=>({...prev,[tab]:Math.max(0,(prev[tab]??0)-((prev[tab]??0)>=uploads.length-1?1:0))})); }, [tab,uploads.length]);
   const clearUploads = useCallback(() => { setTabUploads((prev)=>{ (prev[tab]||[]).forEach((x)=>x.preview&&URL.revokeObjectURL(x.preview)); return {...prev,[tab]:[]}; }); setTabSelectedIdx((prev)=>({...prev,[tab]:0})); }, [tab]);
@@ -191,30 +233,76 @@ export default function App() {
   const onDrop = (e) => { e.preventDefault(); e.currentTarget.classList.remove("drag-over"); handleFiles(e.dataTransfer.files); };
 
   const detParams = () => ({ conf_thr:conf, iou_thr:iou, mode:inspMode, sev_filter:sevFilter, use_clahe:clahe, clahe_clip:claheClip, use_green:green, use_edge:edge, turbidity_in:turbLevel, corr_turb:corrTurb, marine_snow:marineSnow });
-  const enhParams = () => ({ use_clahe:clahe, clahe_clip:claheClip, use_green:green, use_edge:edge, turbidity_in:turbLevel, corr_turb:corrTurb, marine_snow:marineSnow });
-
-  const detectAll = async () => { if (!uploads.length) return; setLoading(true); setError(""); setCompletionAlertSent(false); try { for (const item of uploads) { const data = await runDetection(item.file,detParams()); updateUploadInTab(tab,item.id,{detResult:data}); setSessionDetections((n)=>n+(data.total??data.detections?.length??0)); } } catch(e) { setError(e.response?.data?.detail||e.message); } setLoading(false); };
-  const enhanceAll = async () => { if (!uploads.length) return; setLoading(true); setError(""); try { for (const item of uploads) { const data = await runEnhance(item.file,enhParams()); updateUploadInTab(tab,item.id,{enhResult:data}); } } catch(e) { setError(e.response?.data?.detail||e.message); } setLoading(false); };
-  const runBothAll = async () => { if (!uploads.length) return; setLoading(true); setError(""); setCompletionAlertSent(false); try { for (const item of uploads) { const [det,enh] = await Promise.all([runDetection(item.file,detParams()),runEnhance(item.file,enhParams())]); updateUploadInTab(tab,item.id,{detResult:det,enhResult:enh}); setSessionDetections((n)=>n+(det.total??det.detections?.length??0)); } } catch(e) { setError(e.response?.data?.detail||e.message); } setLoading(false); };
-  const genPDF = async () => { if (!uploads.length) return; setError(""); try { await downloadBatchPDF(uploads.map((u)=>u.file),{...detParams(),vessel_name:vesselName||"Unknown",inspector,pdf_password:reportPassword}); setReportsGenerated((n)=>n+1); } catch(e) { setError(e.response?.data?.detail||e.message); } };
-  const genVideoPDF = async () => { if (!videoFile) return; setError(""); try { await downloadVideoPDF(videoFile,{conf_thr:conf,iou_thr:iou,mode:inspMode,vessel_name:vesselName||"Unknown",inspector,sample_n:10,use_clahe:clahe,clahe_clip:claheClip,use_green:green,use_edge:edge,turbidity_in:turbLevel,corr_turb:corrTurb,pdf_password:reportPassword}); setReportsGenerated((n)=>n+1); } catch(e) { setError(e.response?.data?.detail||e.message); } };
-  const waTo = () => demoUser?.whatsapp?.trim()||"";
-  const sendPDFToWa = async () => { if (!uploads.length) return; if (!waTo()) { setWaMessage("Add your WhatsApp number."); setTimeout(()=>setWaMessage(""),4000); return; } setSendingWa(true); setWaMessage(""); setError(""); try { const res = await sendPDFToWhatsApp(uploads[0].file,{...detParams(),vessel_name:vesselName||"Unknown",inspector,to:waTo(),pdf_password:reportPassword}); setWaMessage(res.sent?"Report sent.":res.message||"Could not send."); } catch(e) { setWaMessage(e.response?.data?.message||e.message||"Failed."); } setSendingWa(false); };
-  const sendVideoPDFToWa = async () => { if (!videoFile) return; if (!waTo()) { setWaMessage("Add your WhatsApp number."); setTimeout(()=>setWaMessage(""),4000); return; } setSendingWa(true); setWaMessage(""); setError(""); try { const res = await sendVideoPDFToWhatsApp(videoFile,{conf_thr:conf,iou_thr:iou,mode:inspMode,vessel_name:vesselName||"Unknown",inspector,sample_n:10,use_clahe:clahe,clahe_clip:claheClip,use_green:green,use_edge:edge,turbidity_in:turbLevel,corr_turb:corrTurb,to:waTo(),pdf_password:reportPassword}); setWaMessage(res.sent?"Sent.":res.message||"Failed."); } catch(e) { setWaMessage(e.response?.data?.message||e.message||"Failed."); } setSendingWa(false); };
-  const sendCompletionAlert = async (src="image") => { if (!waTo()) { setWaMessage("Add your WhatsApp number."); setTimeout(()=>setWaMessage(""),4000); return; } const data=src==="video"?videoResult:latestDetResult; if (!data) return; const total=data.total??data.detections?.length??data.total_detections??0; setSendingWa(true); setWaMessage(""); try { const res = await sendWhatsAppMessage(waTo().replace(/\s/g,""),`NautiCAI done. Risk:${data.risk_score??"—"} Grade:${data.grade??"—"} ${total} det.`); if (res.sent) { setWaMessage("Alert sent."); setCompletionAlertSent(true); } else setWaMessage(res.message||"Failed."); } catch(e) { setWaMessage(e.response?.data?.message||e.message||"Failed."); } setSendingWa(false); };
-  const analyzeVideo = async () => { if (!videoFile) return; setVideoLoading(true); setError(""); setCompletionAlertSent(false); try { const data = await runVideoDetection(videoFile,{conf_thr:conf,iou_thr:iou,mode:inspMode,sample_n:10,use_clahe:clahe,clahe_clip:claheClip,use_green:green,use_edge:edge,turbidity_in:turbLevel,corr_turb:corrTurb}); setVideoResult(data); setSessionDetections((n)=>n+(data.total_detections??data.detections?.length??0)); } catch(e) { setError(e.response?.data?.detail||e.message); } setVideoLoading(false); };
+  const detectAll = async () => { if (!uploads.length) return; setLoading(true); setError(""); try { for (const item of uploads) { const data = await runDetection(item.file,detParams()); updateUploadInTab(tab,item.id,{detResult:data}); setSessionDetections((n)=>n+(data.total??data.detections?.length??0)); } } catch(e) { setError(e.response?.data?.detail||e.message); } setLoading(false); };
+  const genPDF = async () => { if (!uploads.length) return; setError(""); try { await downloadBatchPDF(uploads.map((u)=>u.file),{...detParams(),vessel_name:vesselName||"Unknown",inspector,pdf_password:reportPassword}); setReportsGenerated((n)=>n+1); } catch(e) { setError(formatApiError(e)); } };
+  const genVideoPDF = async () => {
+    if (!videoFile) return;
+    setError("");
+    setVideoPdfLoading(true);
+    try {
+      await downloadVideoPDF(videoFile, {
+        conf_thr: conf,
+        iou_thr: iou,
+        mode: inspMode,
+        vessel_name: vesselName || "Unknown",
+        inspector,
+        sample_n: 10,
+        use_clahe: clahe,
+        clahe_clip: claheClip,
+        use_green: green,
+        use_edge: edge,
+        turbidity_in: turbLevel,
+        corr_turb: corrTurb,
+        pdf_password: reportPassword,
+      });
+      setReportsGenerated((n) => n + 1);
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : e.message || "PDF generation failed");
+    } finally {
+      setVideoPdfLoading(false);
+    }
+  };
+  const analyzeVideo = async () => { if (!videoFile) return; setVideoLoading(true); setError(""); try { const data = await runVideoDetection(videoFile,{conf_thr:conf,iou_thr:iou,mode:inspMode,sample_n:10,use_clahe:clahe,clahe_clip:claheClip,use_green:green,use_edge:edge,turbidity_in:turbLevel,corr_turb:corrTurb}); setVideoResult(data); setSessionDetections((n)=>n+(data.total_detections??data.detections?.length??0)); } catch(e) { setError(e.response?.data?.detail||e.message); } setVideoLoading(false); };
+  const exportAnnotatedVideo = async () => {
+    if (!videoFile) return;
+    setVideoExportLoading(true);
+    setError("");
+    try {
+      await downloadAnnotatedVideo(videoFile, {
+        conf_thr: conf,
+        iou_thr: iou,
+        mode: inspMode,
+        sample_n: 10,
+        use_clahe: clahe,
+        clahe_clip: claheClip,
+        use_green: green,
+        use_edge: edge,
+        turbidity_in: turbLevel,
+        corr_turb: corrTurb,
+      });
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setVideoExportLoading(false);
+    }
+  };
   const exportCSV = (data) => { const dets=data?.detections||[]; if (!dets.length) return; const csv=[["id","class","confidence","severity","bbox_area_px"].join(","),...dets.map((d,i)=>{ const w=Math.abs((d.bbox?.xmax??d.bbox?.x2??0)-(d.bbox?.xmin??d.bbox?.x1??0)); const h=Math.abs((d.bbox?.ymax??d.bbox?.y2??0)-(d.bbox?.ymin??d.bbox?.y1??0)); return [i+1,d.cls??d.class??"",d.conf!=null?Number(d.conf).toFixed(4):"",d.severity??"",Math.round(w*h)].map((c)=>`"${String(c).replace(/"/g,'""')}"`).join(","); })].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download=`NautiCAI_${data?.mission_id||"export"}.csv`; a.click(); };
 
-  useEffect(() => { const onKey=(e)=>{ if (!e.ctrlKey||e.key!=="Enter") return; e.preventDefault(); if (tab==="scan"&&uploads.length) runBothAll(); else if (["hull","pipeline","cable"].includes(tab)&&uploads.length) detectAll(); else if (tab==="video"&&videoFile) analyzeVideo(); }; window.addEventListener("keydown",onKey); return ()=>window.removeEventListener("keydown",onKey); }, [tab,uploads,videoFile]);
+  useEffect(() => { const onKey=(e)=>{ if (!e.ctrlKey||e.key!=="Enter") return; e.preventDefault(); if (["scan","hull","pipeline","cable"].includes(tab)&&uploads.length) detectAll(); else if (tab==="video"&&videoFile) analyzeVideo(); }; window.addEventListener("keydown",onKey); return ()=>window.removeEventListener("keydown",onKey); }, [tab,uploads,videoFile]);
 
-  const imagePageProps = { uploads, selectedUpload, selectedIdx, setSelectedIdx, fileRef, folderRef, handleFiles, removeUpload, clearUploads, onDragOver, onDragLeave, onDrop, detectAll, enhanceAll, runBothAll, genPDF, sendPDFToWa, sendCompletionAlert, completionAlertSent, sendingWa, waMessage, exportCSV, loading, error, privacyCountdown, deletionCert, insp1Sev, setInsp1Sev, insp2Sev, setInsp2Sev, onOpenCompliance:()=>setComplianceOpen(true) };
+  const imagePageProps = { uploads, selectedUpload, selectedIdx, setSelectedIdx, fileRef, folderRef, handleFiles, removeUpload, clearUploads, onDragOver, onDragLeave, onDrop, detectAll, genPDF, exportCSV, loading, error, privacyCountdown, deletionCert, insp1Sev, setInsp1Sev, insp2Sev, setInsp2Sev, onOpenCompliance:()=>setComplianceOpen(true) };
+
+  const hullFullViewer = tab === "hull" && hullPanelMode === "hull3d";
 
   return (
     <div className="app-shell">
       {complianceOpen && <ComplianceModal detResult={latestDetResult} vesselName={vesselName} inspector={inspector} onClose={()=>setComplianceOpen(false)} />}
       <aside className="sidebar">
         <div className="sb-brand"><img className="sb-logo" src="/nauticai-logo.png" alt="NautiCAI" /><div className="sb-brand-text"><h3>NAUTICAI</h3><a href="https://www.nauticai-ai.com" target="_blank" rel="noreferrer">www.nauticai-ai.com</a></div></div>
-        <div className="sb-status"><span className="pill"><span className={`dot ${health?.status==="ok"?"dot-ok":"dot-warn"}`} />{health?.status==="ok"?"API Online":"API Offline"}</span>{health?.model&&<span className="pill"><span className="dot dot-ok" />{health.model}</span>}</div>
+        <p className="sb-quote">
+          <strong>NautiCAI</strong> — auditable subsea vision for inspection workflows and survey-oriented reporting.
+        </p>
         <div className="sb-section"><div className="sb-label">Detection Engine</div><div className="ctrl"><div className="ctrl-header"><label>Confidence Threshold</label><span>{conf.toFixed(2)}</span></div><input type="range" className="ctrl-slider" min={0.05} max={0.95} step={0.05} value={conf} onChange={(e)=>setConf(+e.target.value)} /></div><div className="ctrl"><div className="ctrl-header"><label>IoU Threshold</label><span>{iou.toFixed(2)}</span></div><input type="range" className="ctrl-slider" min={0.1} max={0.9} step={0.05} value={iou} onChange={(e)=>setIou(+e.target.value)} /></div></div>
         <div className="sb-sep" />
         <div className="sb-section"><div className="sb-label">Severity Filter</div><div className="ctrl"><div className="ctrl-header"><label>Display mode</label></div><select className="ctrl-select" value={sevFilter} onChange={(e)=>setSevFilter(e.target.value)}><option>All Detections</option><option>Critical Only</option><option>High+</option><option>Medium+</option></select></div></div>
@@ -225,26 +313,38 @@ export default function App() {
         <div className="sb-footer"><img src="/nauticai-logo.png" alt="" /><a href="https://www.nauticai-ai.com" target="_blank" rel="noreferrer">www.nauticai-ai.com</a><small>© 2025 NautiCAI Pte Ltd · Singapore</small></div>
       </aside>
       <div className="main-area">
-        <header className="topbar"><div className="topbar-left"><img className="topbar-logo" src="/nauticai-logo.png" alt="NautiCAI" /><div className="topbar-title"><h1>NAUTICAI</h1><p>Deep-sea Anomaly Detection Platform</p></div></div><div className="topbar-right"><span className="topbar-chip">BETA · INTERNAL DEMO</span><a href={window.location.port==="3000"?"http://localhost:8080/demo.html":"/demo.html"} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{textDecoration:"none",color:"inherit"}}>Book a demo</a></div></header>
-        <div className="tab-bar" style={{overflowX:"auto"}}>{TABS.map((t)=><button key={t.id} className={`tab-btn ${tab===t.id?"active":""}`} onClick={()=>setTab(t.id)}><span className="tab-icon">{t.icon}</span>{t.label}</button>)}</div>
+        <header className="topbar" style={{ display: hullFullViewer ? "none" : undefined }}><div className="topbar-left"><img className="topbar-logo" src="/nauticai-logo.png" alt="NautiCAI" /><div className="topbar-title"><h1>NAUTICAI</h1><p>Subsea inspection intelligence — auditable AI vision and survey-ready deliverables</p></div></div><div className="topbar-right"><span className="topbar-chip">BETA · INTERNAL DEMO</span><a href={window.location.port==="3000"?"http://localhost:8080/demo.html":"/demo.html"} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{textDecoration:"none",color:"inherit"}}>Book a demo</a></div></header>
+        <div className="tab-bar" style={{ overflowX: "auto", display: hullFullViewer ? "none" : undefined }}>{TABS.map((t)=><button key={t.id} className={`tab-btn ${tab===t.id?"active":""}`} onClick={()=>setTab(t.id)}><span className="tab-icon">{t.icon}</span>{t.label}</button>)}</div>
         <AnimatePresence mode="wait">
           <motion.div key={tab} className="page-content" variants={pgVar} initial="enter" animate="center" exit="exit">
             {tab==="scan"&&<ScanPage {...imagePageProps} />}
-            {tab==="hull"&&<HullPage {...imagePageProps} />}
-            {tab==="video"&&<VideoPage videoFile={videoFile} videoRef={videoRef} setVideoFile={setVideoFile} onDragOver={onDragOver} onDragLeave={onDragLeave} analyzeVideo={analyzeVideo} genVideoPDF={genVideoPDF} sendVideoPDFToWa={sendVideoPDFToWa} sendCompletionAlert={sendCompletionAlert} completionAlertSent={completionAlertSent} videoLoading={videoLoading} sendingWa={sendingWa} waMessage={waMessage} videoResult={videoResult} error={error} />}
+            {tab==="hull"&&<HullPage {...imagePageProps} hullPanelMode={hullPanelMode} setHullPanelMode={setHullPanelMode} onGoDashboard={() => setTab("dash")} />}
+            {tab==="video"&&<VideoPage videoFile={videoFile} videoRef={videoRef} setVideoFile={setVideoFile} onDragOver={onDragOver} onDragLeave={onDragLeave} analyzeVideo={analyzeVideo} genVideoPDF={genVideoPDF} exportAnnotatedVideo={exportAnnotatedVideo} videoLoading={videoLoading} videoPdfLoading={videoPdfLoading} videoExportLoading={videoExportLoading} videoResult={videoResult} error={error} />}
             {tab==="pipeline"&&<PipelinePage {...imagePageProps} />}
             {tab==="cable"&&<CablePage {...imagePageProps} />}
             {tab==="deadline"&&<DeadlinePage detResult={latestDetResult} />}
-            {tab==="dash"&&<DashPage detResult={latestDetResult} videoResult={videoResult} sessionDetections={sessionDetections} reportsGenerated={reportsGenerated} />}
+            {tab==="dash"&&<DashPage detResult={latestDetResult} sessionDetections={sessionDetections} reportsGenerated={reportsGenerated} />}
             {tab==="memory"&&<MemoryPage missions={missions} />}
             {tab==="comply"&&<CompliancePage detResult={latestDetResult} vesselName={vesselName} inspector={inspector} />}
             {tab==="zero"&&<ZeroShotPage zeroShotClasses={zeroShotClasses} setZeroShotClasses={setZeroShotClasses} uploads={uploads} fileRef={fileRef} folderRef={folderRef} handleFiles={handleFiles} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} />}
             {tab==="road"&&<RoadmapPage />}
-            {tab==="sonar"&&<SonarAnalysis />}
+            {tab==="sonar"&&<SonarAnalysis vesselName={vesselName} inspector={inspector} />}
+            {tab==="combined"&&(
+              <CombinedScan
+                combinedParams={{ conf_thr: conf, iou_thr: iou, mode: inspMode, sev_filter: sevFilter }}
+                vesselName={vesselName}
+                inspector={inspector}
+              />
+            )}
             {tab==="weld"&&<WeldInspector />}
           </motion.div>
         </AnimatePresence>
-        <footer className="app-footer"><img src="/nauticai-logo.png" alt="" /><span className="footer-dot">·</span><a href="https://www.nauticai-ai.com" target="_blank" rel="noreferrer">www.nauticai-ai.com</a><span className="footer-dot">·</span><span>NautiCAI v1.0 — Deep-tech Venture · Singapore</span></footer>
+        <footer className="app-footer">
+          <div className="app-footer-row">
+            <img src="/nauticai-logo.png" alt="" /><span className="footer-dot">·</span><a href="https://www.nauticai-ai.com" target="_blank" rel="noreferrer">www.nauticai-ai.com</a><span className="footer-dot">·</span><span>NautiCAI v1.0 — Deep-tech Venture · Singapore</span>
+          </div>
+          <p className="app-footer-disclaimer">Advisory analytics only — not a substitute for class society approval, regulatory clearance, or onboard surveyor judgement.</p>
+        </footer>
       </div>
     </div>
   );
@@ -255,8 +355,27 @@ export default function App() {
 // ═══════════════════════════════════════════════════════════════════════════
 function Toggle({label,checked,onChange}) { return <label className="ctrl-toggle"><span className="tgl"><input type="checkbox" checked={checked} onChange={onChange} /><span className="tgl-track" /><span className="tgl-knob" /></span><span>{label}</span></label>; }
 
-function DropZone({fileRef,folderRef,uploads,handleFiles,onDragOver,onDragLeave,onDrop}) {
-  return (<div className="card mb-20"><div className="card-title">Image Upload</div><div className="dropzone" onClick={()=>fileRef.current?.click()} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}><div className="dz-icon">📷</div><div className="dz-label">{uploads?.length?`Uploaded ${uploads.length} image(s) — click or drop to add more`:"Drop underwater image(s) here, or click to browse"}</div><div className="dz-hint">Supported: JPG, PNG, BMP · Multiple images + folder upload</div></div><div className="row" style={{gap:10,marginTop:12,flexWrap:"wrap"}}><button type="button" className="btn btn-ghost" onClick={()=>fileRef.current?.click()}>+ Add Images</button><button type="button" className="btn btn-ghost" onClick={()=>folderRef.current?.click()}>📁 Upload Folder</button></div><input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e)=>handleFiles(e.target.files)} /><input ref={folderRef} type="file" accept="image/*" multiple hidden onChange={(e)=>handleFiles(e.target.files)} {...{webkitdirectory:"",directory:""}} /></div>);
+function DropZone({ fileRef, folderRef, uploads, handleFiles, onDragOver, onDragLeave, onDrop }) {
+  const onPickFiles = (e) => {
+    handleFiles(e.target.files);
+    e.target.value = "";
+  };
+  return (
+    <div className="card mb-20">
+      <div className="card-title">Image Upload</div>
+      <div className="dropzone" onClick={() => fileRef.current?.click()} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+        <div className="dz-icon">📷</div>
+        <div className="dz-label">{uploads?.length ? `Uploaded ${uploads.length} image(s) — click or drop to add more` : "Drop underwater image(s) here, or click to browse"}</div>
+        <div className="dz-hint">Supported: JPG, PNG, BMP · Multiple images + folder upload</div>
+      </div>
+      <div className="row" style={{ gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+        <button type="button" className="btn btn-ghost" onClick={() => fileRef.current?.click()}>+ Add Images</button>
+        <button type="button" className="btn btn-ghost" onClick={() => folderRef.current?.click()}>📁 Upload Folder</button>
+      </div>
+      <input ref={fileRef} type="file" accept="image/*,.jpg,.jpeg,.png,.bmp,.webp,.tif,.tiff" multiple hidden onChange={onPickFiles} />
+      <input ref={folderRef} type="file" accept="image/*,.jpg,.jpeg,.png,.bmp,.webp,.tif,.tiff" multiple hidden onChange={onPickFiles} webkitdirectory="" directory="" />
+    </div>
+  );
 }
 
 function SpotlightFilmstrip({uploads,selectedIdx,setSelectedIdx,removeUpload,clearUploads}) {
@@ -264,7 +383,7 @@ function SpotlightFilmstrip({uploads,selectedIdx,setSelectedIdx,removeUpload,cle
   return (<div className="card mb-20" style={{overflow:"hidden"}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}><div className="card-title" style={{margin:0}}>Uploaded Images</div><div style={{display:"flex",gap:8}}><div style={{fontSize:12,opacity:0.65,padding:"8px 12px",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,background:"rgba(255,255,255,0.02)"}}>{selectedIdx+1} / {uploads.length}</div><button className="btn btn-ghost" onClick={clearUploads}>Clear All</button></div></div><div style={{display:"grid",gridTemplateColumns:"180px 1fr",gap:14,minHeight:420}}><div style={{display:"flex",flexDirection:"column",gap:10,maxHeight:420,overflowY:"auto",paddingRight:4}}>{uploads.map((item,idx)=>(<button key={item.id} onClick={()=>setSelectedIdx(idx)} style={{width:"100%",textAlign:"left",border:idx===selectedIdx?"2px solid #22d3ee":"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:6,background:idx===selectedIdx?"rgba(34,211,238,0.08)":"rgba(255,255,255,0.02)",cursor:"pointer",display:"flex",gap:8,alignItems:"center"}}><img src={item.preview} alt="" style={{width:58,height:58,objectFit:"cover",borderRadius:6,flexShrink:0}} /><div style={{minWidth:0,flex:1}}><div style={{fontSize:11,fontWeight:700,color:idx===selectedIdx?"#22d3ee":"rgba(255,255,255,0.88)",marginBottom:4}}>Image {idx+1}</div><div style={{fontSize:10,color:"rgba(255,255,255,0.6)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.file.name}</div></div></button>))}</div><div style={{position:"relative",borderRadius:12,overflow:"hidden",background:"rgba(255,255,255,0.03)",minHeight:420,display:"flex",alignItems:"center",justifyContent:"center"}}><img src={uploads[selectedIdx]?.preview} alt="" style={{width:"100%",height:"100%",maxHeight:420,objectFit:"contain",display:"block"}} /><div style={{position:"absolute",top:12,left:12,display:"flex",gap:8}}><div style={{background:"rgba(0,0,0,0.65)",padding:"6px 10px",borderRadius:6,fontSize:12,color:"#fff"}}>Active Image</div><div style={{background:"rgba(34,211,238,0.18)",border:"1px solid rgba(34,211,238,0.35)",padding:"6px 10px",borderRadius:6,fontSize:12,color:"#22d3ee",fontWeight:700}}>#{selectedIdx+1}</div></div><div style={{position:"absolute",bottom:12,left:12,right:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}><div style={{background:"rgba(0,0,0,0.65)",padding:"8px 12px",borderRadius:8,fontSize:12,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"75%"}}>{uploads[selectedIdx]?.file?.name}</div><button className="btn btn-ghost" style={{background:"rgba(0,0,0,0.65)"}} onClick={()=>removeUpload(uploads[selectedIdx].id)}>Remove</button></div></div></div></div>);
 }
 
-function StatusBar({error,waMessage}) { return (<>{error&&<div className="alert alert-error" style={{marginTop:12}}>{error}</div>}{waMessage&&<div className="alert" style={{marginTop:8}}>{waMessage}</div>}</>); }
+function StatusBar({error}) { return error ? (<div className="alert alert-error" style={{marginTop:12}}>{error}</div>) : null; }
 
 function PrivacyTimer({countdown,cert}) { if (countdown===null&&!cert) return null; if (cert) return (<div style={{marginTop:16,padding:"12px 16px",background:"#00cc4411",border:"1px solid #00cc4444",borderRadius:8}}><div style={{fontSize:11,color:"#00cc44",fontWeight:700,letterSpacing:1,marginBottom:6}}>✅ DELETION CERTIFICATE ISSUED</div><div style={{fontSize:11,opacity:0.7}}>All client footage cryptographically deleted.</div><div style={{fontSize:10,opacity:0.5,marginTop:4,fontFamily:"monospace"}}>CERT-{cert.hash} · {new Date(cert.time).toLocaleTimeString()}</div></div>); const pct=(countdown/60)*100; const col=countdown>30?"#22c55e":countdown>10?"#f59e0b":"#ef4444"; return (<div style={{marginTop:16,padding:"12px 16px",background:"#ef444411",border:"1px solid #ef444433",borderRadius:8}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><div style={{fontSize:11,color:col,fontWeight:700,letterSpacing:1}}>🔒 PRIVACY-FIRST AUTO-DELETION</div><div style={{fontSize:18,fontWeight:900,color:col,fontFamily:"monospace"}}>{countdown}s</div></div><div style={{height:4,borderRadius:2,background:"rgba(255,255,255,0.08)",overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:col,borderRadius:2,transition:"width 1s linear"}} /></div><div style={{fontSize:10,opacity:0.5,marginTop:6}}>Client footage will be cryptographically deleted after this timer.</div></div>); }
 
@@ -287,11 +406,11 @@ function DetectionResultsPanel({detResult,enhResult,preview,exportCSV}) {
   const enh=detResult?.enhanced_b64??enhResult?.enhanced_b64??enhResult?.image??null;
   const sc=dets.reduce((a,d)=>{const s=d.severity||"Unknown";a[s]=(a[s]||0)+1;return a;},{});
   const pie=[{label:"Critical",value:sc["Critical"]??0,color:"#ef4444"},{label:"High",value:sc["High"]??0,color:"#f97316"},{label:"Medium",value:sc["Medium"]??0,color:"#f59e0b"},{label:"Low",value:sc["Low"]??0,color:"#22c55e"}].filter((d)=>d.value>0);
-  return (<div style={{marginTop:24}}>{detResult&&(<><div style={{marginBottom:16}}><div style={{fontSize:13,letterSpacing:1,opacity:0.5,textTransform:"uppercase",marginBottom:4}}>Detection Results</div><div style={{fontSize:20,fontWeight:700}}>{total} {total===1?"Anomaly":"Anomalies"} Found</div></div><div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}><StatBox label="DETECTIONS" value={total} color="#22d3ee" /><StatBox label="RISK SCORE" value={detResult.risk_score!=null?`${detResult.risk_score}%`:"—"} color="#f59e0b" /><StatBox label="GRADE" value={detResult.grade??"—"} color="#a78bfa" /><StatBox label="MISSION" value={detResult.mission_id??"—"} color="#94a3b8" small /></div></>)}<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}><ImgPanel label="ANNOTATED" color="#22d3ee" src={ann?`data:image/jpeg;base64,${ann}`:null} placeholder="Run detection" /><ImgPanel label="HEATMAP" color="#f59e0b" src={heat?`data:image/jpeg;base64,${heat}`:null} placeholder="Not available" /></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}><ImgPanel label="ORIGINAL" color="#64748b" src={preview} placeholder="No image" /><ImgPanel label="ENHANCED" color="#22c55e" src={enh?`data:image/jpeg;base64,${enh}`:null} placeholder="Click Detect + Enhance" /></div>{pie.length>0&&(<div className="card" style={{marginBottom:20}}><div className="card-title" style={{marginBottom:14}}>Severity Distribution</div><div style={{display:"flex",alignItems:"center",gap:32}}><PieChart data={pie} size={160} /><div style={{flex:1}}>{pie.map((d)=>(<div key={d.label} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}><span style={{width:12,height:12,borderRadius:"50%",background:d.color,flexShrink:0}} /><span style={{fontSize:13,flex:1}}>{d.label}</span><span style={{fontWeight:700,color:d.color}}>{d.value}</span><span style={{fontSize:11,opacity:0.5,minWidth:32}}>{((d.value/total)*100).toFixed(0)}%</span></div>))}<div style={{marginTop:14,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.07)",fontSize:12,opacity:0.6}}>Recovery Rate: <strong style={{color:"#22c55e"}}>{(((sc["Low"]??0)+(sc["Medium"]??0))/total*100).toFixed(0)}%</strong></div></div></div></div>)}{dets.length>0&&(<div className="card" style={{overflowX:"auto"}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}><div className="card-title" style={{margin:0}}>Detection Breakdown — {dets.length} objects</div><button className="btn btn-ghost" style={{padding:"4px 12px",fontSize:12}} onClick={()=>exportCSV({detections:dets,mission_id:detResult?.mission_id})}>📊 CSV</button></div><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>{["#","CLASS","CONFIDENCE","SEVERITY","BBOX AREA"].map((h)=><th key={h} style={{padding:"6px 12px",textAlign:"left",opacity:0.45,fontSize:11,letterSpacing:0.8,fontWeight:600}}>{h}</th>)}</tr></thead><tbody>{dets.map((d,i)=>(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)"}}><td style={{padding:"8px 12px",opacity:0.4}}>{i+1}</td><td style={{padding:"8px 12px",fontWeight:600}}>{d.cls??d.class??"—"}</td><td style={{padding:"8px 12px"}}><span style={{color:confColor(d.conf),fontWeight:600}}>{d.conf!=null?`${(d.conf*100).toFixed(1)}%`:"—"}</span></td><td style={{padding:"8px 12px"}}>{d.severity?<span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:4,fontSize:11,fontWeight:700,background:sevColor(d.severity)+"22",color:sevColor(d.severity)}}><span style={{width:7,height:7,borderRadius:"50%",background:sevColor(d.severity)}} />{d.severity}</span>:"—"}</td><td style={{padding:"8px 12px",opacity:0.6}}>{fmtArea(bboxArea(d.bbox))}</td></tr>))}</tbody></table></div>)}</div>);
+  return (<div style={{marginTop:24}}>{detResult&&(<><div style={{marginBottom:16}}><div style={{fontSize:13,letterSpacing:1,opacity:0.5,textTransform:"uppercase",marginBottom:4}}>Detection Results</div><div style={{fontSize:20,fontWeight:700}}>{total} {total===1?"Anomaly":"Anomalies"} Found</div></div><div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}><StatBox label="DETECTIONS" value={total} color="#22d3ee" /><StatBox label="INSPECTION SCORE" value={detResult.risk_score!=null?`${detResult.risk_score}%`:"—"} color="#f59e0b" /><StatBox label="GRADE" value={detResult.grade??"—"} color="#a78bfa" /><StatBox label="MISSION" value={detResult.mission_id??"—"} color="#94a3b8" small /></div><div style={{fontSize:10,opacity:0.45,marginTop:-12,marginBottom:16}}>Inspection score = health-style index (higher with fewer / lighter defects); not “% danger”.</div></>)}<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}><ImgPanel label="ANNOTATED" color="#22d3ee" src={ann?`data:image/jpeg;base64,${ann}`:null} placeholder="Run detection" /><ImgPanel label="HEATMAP" color="#f59e0b" src={heat?`data:image/jpeg;base64,${heat}`:null} placeholder="Not available" /></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}><ImgPanel label="ORIGINAL" color="#64748b" src={preview} placeholder="No image" /><ImgPanel label="ENHANCED" color="#22c55e" src={enh?`data:image/jpeg;base64,${enh}`:null} placeholder="From detection response" /></div>{pie.length>0&&(<div className="card" style={{marginBottom:20}}><div className="card-title" style={{marginBottom:14}}>Severity Distribution</div><div style={{display:"flex",alignItems:"center",gap:32}}><PieChart data={pie} size={160} /><div style={{flex:1}}>{pie.map((d)=>(<div key={d.label} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}><span style={{width:12,height:12,borderRadius:"50%",background:d.color,flexShrink:0}} /><span style={{fontSize:13,flex:1}}>{d.label}</span><span style={{fontWeight:700,color:d.color}}>{d.value}</span><span style={{fontSize:11,opacity:0.5,minWidth:32}}>{((d.value/total)*100).toFixed(0)}%</span></div>))}<div style={{marginTop:14,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.07)",fontSize:12,opacity:0.6}}>Recovery Rate: <strong style={{color:"#22c55e"}}>{(((sc["Low"]??0)+(sc["Medium"]??0))/total*100).toFixed(0)}%</strong></div></div></div></div>)}{dets.length>0&&(<div className="card" style={{overflowX:"auto"}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}><div className="card-title" style={{margin:0}}>Detection Breakdown — {dets.length} objects</div><button className="btn btn-ghost" style={{padding:"4px 12px",fontSize:12}} onClick={()=>exportCSV({detections:dets,mission_id:detResult?.mission_id})}>📊 CSV</button></div><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>{["#","CLASS","CONFIDENCE","SEVERITY","BBOX AREA"].map((h)=><th key={h} style={{padding:"6px 12px",textAlign:"left",opacity:0.45,fontSize:11,letterSpacing:0.8,fontWeight:600}}>{h}</th>)}</tr></thead><tbody>{dets.map((d,i)=>(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)"}}><td style={{padding:"8px 12px",opacity:0.4}}>{i+1}</td><td style={{padding:"8px 12px",fontWeight:600}}>{d.cls??d.class??"—"}</td><td style={{padding:"8px 12px"}}><span style={{color:confColor(d.conf),fontWeight:600}}>{d.conf!=null?`${(d.conf*100).toFixed(1)}%`:"—"}</span></td><td style={{padding:"8px 12px"}}>{d.severity?<span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:4,fontSize:11,fontWeight:700,background:sevColor(d.severity)+"22",color:sevColor(d.severity)}}><span style={{width:7,height:7,borderRadius:"50%",background:sevColor(d.severity)}} />{d.severity}</span>:"—"}</td><td style={{padding:"8px 12px",opacity:0.6}}>{fmtArea(bboxArea(d.bbox))}</td></tr>))}</tbody></table></div>)}</div>);
 }
 
-function ImageActionButtons({uploads,loading,detectAll,genPDF,sendPDFToWa,sendCompletionAlert,completionAlertSent,sendingWa,exportCSV,latestDetForTab,onOpenCompliance,scanLabel="Run Scan",showEnhance=false,enhanceAll,runBothAll}) {
-  return (<div className="row mb-20" style={{gap:10,flexWrap:"wrap"}}><button className="btn btn-primary" disabled={!uploads.length||loading} onClick={detectAll}>{loading&&<span className="spinner" />} {scanLabel}</button>{showEnhance&&<><button className="btn btn-ghost" disabled={!uploads.length||loading} onClick={enhanceAll}>Enhance Visibility</button><button className="btn btn-primary" disabled={!uploads.length||loading} onClick={runBothAll}>Detect + Enhance</button></>}<button className="btn btn-ghost" disabled={!uploads.length} onClick={genPDF}>📄 PDF Report</button><button className="btn btn-ghost" disabled={!uploads.length||sendingWa} onClick={sendPDFToWa}>{sendingWa?"…":"📱 WhatsApp"}</button>{latestDetForTab&&<><button className="btn btn-ghost" disabled={sendingWa||completionAlertSent} onClick={()=>sendCompletionAlert("image")}>{completionAlertSent?"✓ Sent":"🔔 Alert"}</button><button className="btn btn-ghost" onClick={()=>exportCSV(latestDetForTab)}>📊 CSV</button><button className="btn btn-primary" onClick={onOpenCompliance}>📋 Compliance</button></>}</div>);
+function ImageActionButtons({uploads,loading,detectAll,genPDF,exportCSV,latestDetForTab,onOpenCompliance,scanLabel="Run Scan"}) {
+  return (<div className="row mb-20" style={{gap:10,flexWrap:"wrap"}}><button className="btn btn-primary" disabled={!uploads.length||loading} onClick={detectAll}>{loading&&<span className="spinner" />} {scanLabel}</button><button className="btn btn-ghost" disabled={!uploads.length} onClick={genPDF}>📄 PDF Report</button>{latestDetForTab&&<><button className="btn btn-ghost" onClick={()=>exportCSV(latestDetForTab)}>📊 CSV</button><button className="btn btn-primary" onClick={onOpenCompliance}>📋 Compliance</button></>}</div>);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -308,25 +427,68 @@ function ComplianceModal({detResult,vesselName,inspector,onClose}) {
 // PAGE: SCAN
 // ═══════════════════════════════════════════════════════════════════════════
 function ScanPage(props) {
-  const {uploads,selectedUpload,selectedIdx,setSelectedIdx,fileRef,folderRef,handleFiles,removeUpload,clearUploads,onDragOver,onDragLeave,onDrop,detectAll,enhanceAll,runBothAll,genPDF,sendPDFToWa,sendCompletionAlert,completionAlertSent,sendingWa,waMessage,exportCSV,loading,error,privacyCountdown,deletionCert,insp1Sev,setInsp1Sev,insp2Sev,setInsp2Sev,onOpenCompliance}=props;
+  const {uploads,selectedUpload,selectedIdx,setSelectedIdx,fileRef,folderRef,handleFiles,removeUpload,clearUploads,onDragOver,onDragLeave,onDrop,detectAll,genPDF,exportCSV,loading,error,privacyCountdown,deletionCert,insp1Sev,setInsp1Sev,insp2Sev,setInsp2Sev,onOpenCompliance}=props;
   const det=uploads.find((x)=>x.detResult)?.detResult||null;
-  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Anomaly Detection</div><h2 className="section-title">Underwater Anomaly Scan</h2><p className="section-desc">Upload underwater images for AI-powered anomaly detection, visibility enhancement, and PDF reports.</p><div className="section-rule" /></div><DropZone {...{fileRef,folderRef,uploads,handleFiles,onDragOver,onDragLeave,onDrop}} /><SpotlightFilmstrip {...{uploads,selectedIdx,setSelectedIdx,removeUpload,clearUploads}} /><ImageActionButtons uploads={uploads} loading={loading} detectAll={detectAll} genPDF={genPDF} sendPDFToWa={sendPDFToWa} sendCompletionAlert={sendCompletionAlert} completionAlertSent={completionAlertSent} sendingWa={sendingWa} exportCSV={exportCSV} latestDetForTab={det} onOpenCompliance={onOpenCompliance} scanLabel="Run Detection" showEnhance enhanceAll={enhanceAll} runBothAll={runBothAll} /><StatusBar error={error} waMessage={waMessage} /><PrivacyTimer countdown={privacyCountdown} cert={deletionCert} />{selectedUpload&&<DetectionResultsPanel detResult={selectedUpload.detResult} enhResult={selectedUpload.enhResult} preview={selectedUpload.preview} exportCSV={exportCSV} />}{det&&<DisagreementFlag insp1Sev={insp1Sev} setInsp1Sev={setInsp1Sev} insp2Sev={insp2Sev} setInsp2Sev={setInsp2Sev} />}</>);
+  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Anomaly Detection</div><h2 className="section-title">Underwater Anomaly Scan</h2><div className="section-rule" /></div><DropZone {...{fileRef,folderRef,uploads,handleFiles,onDragOver,onDragLeave,onDrop}} /><SpotlightFilmstrip {...{uploads,selectedIdx,setSelectedIdx,removeUpload,clearUploads}} /><ImageActionButtons uploads={uploads} loading={loading} detectAll={detectAll} genPDF={genPDF} exportCSV={exportCSV} latestDetForTab={det} onOpenCompliance={onOpenCompliance} scanLabel="Run Detection" /><StatusBar error={error} /><PrivacyTimer countdown={privacyCountdown} cert={deletionCert} />{selectedUpload&&<DetectionResultsPanel detResult={selectedUpload.detResult} enhResult={selectedUpload.enhResult} preview={selectedUpload.preview} exportCSV={exportCSV} />}{det&&<DisagreementFlag insp1Sev={insp1Sev} setInsp1Sev={setInsp1Sev} insp2Sev={insp2Sev} setInsp2Sev={setInsp2Sev} />}</>);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PAGE: HULL
 // ═══════════════════════════════════════════════════════════════════════════
 function HullPage(props) {
-  const {uploads,selectedUpload,selectedIdx,setSelectedIdx,fileRef,folderRef,handleFiles,removeUpload,clearUploads,onDragOver,onDragLeave,onDrop,detectAll,genPDF,sendPDFToWa,sendCompletionAlert,completionAlertSent,sendingWa,waMessage,exportCSV,loading,error,privacyCountdown,deletionCert,insp1Sev,setInsp1Sev,insp2Sev,setInsp2Sev,onOpenCompliance}=props;
+  const {uploads,selectedUpload,selectedIdx,setSelectedIdx,fileRef,folderRef,handleFiles,removeUpload,clearUploads,onDragOver,onDragLeave,onDrop,detectAll,genPDF,exportCSV,loading,error,privacyCountdown,deletionCert,insp1Sev,setInsp1Sev,insp2Sev,setInsp2Sev,onOpenCompliance,onGoDashboard,hullPanelMode,setHullPanelMode}=props;
   const det=uploads.find((x)=>x.detResult)?.detResult||null;
-  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Hull Inspection</div><h2 className="section-title">Hull Inspection</h2><p className="section-desc">Detect corrosion, biofouling, cracks and structural anomalies on vessel hull surfaces.</p><div className="section-rule" /></div><DropZone {...{fileRef,folderRef,uploads,handleFiles,onDragOver,onDragLeave,onDrop}} /><SpotlightFilmstrip {...{uploads,selectedIdx,setSelectedIdx,removeUpload,clearUploads}} /><ImageActionButtons uploads={uploads} loading={loading} detectAll={detectAll} genPDF={genPDF} sendPDFToWa={sendPDFToWa} sendCompletionAlert={sendCompletionAlert} completionAlertSent={completionAlertSent} sendingWa={sendingWa} exportCSV={exportCSV} latestDetForTab={det} onOpenCompliance={onOpenCompliance} scanLabel="Run Hull Scan" /><StatusBar error={error} waMessage={waMessage} /><PrivacyTimer countdown={privacyCountdown} cert={deletionCert} />{selectedUpload&&<DetectionResultsPanel detResult={selectedUpload.detResult} preview={selectedUpload.preview} exportCSV={exportCSV} />}{det&&<DisagreementFlag insp1Sev={insp1Sev} setInsp1Sev={setInsp1Sev} insp2Sev={insp2Sev} setInsp2Sev={setInsp2Sev} />}</>);
+  if (hullPanelMode==="hull3d") {
+    return (
+      <Hull3DPanel
+        uploads={uploads}
+        onGoDashboard={onGoDashboard}
+        onBackToInspection={()=>setHullPanelMode("inspection")}
+        embedFullPage
+      />
+    );
+  }
+  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Hull Inspection</div><h2 className="section-title">Hull Inspection</h2><div className="section-rule" /></div>
+    <div style={{display:"flex",alignItems:"center",gap:0,marginBottom:18,borderRadius:8,overflow:"hidden",border:"1px solid rgba(34,211,238,0.2)",width:"fit-content"}}>
+      {[
+        ["inspection","📷 Inspection"],
+        ["hull3d","🧊 3D Hull Viewer"],
+      ].map(([id,label],i,a)=>(
+        <button key={id} type="button" onClick={()=>setHullPanelMode(id)} style={{padding:"8px 20px",background:hullPanelMode===id?"rgba(34,211,238,0.15)":"transparent",border:"none",borderRight:i<a.length-1?"1px solid rgba(34,211,238,0.2)":"none",color:hullPanelMode===id?"#22d3ee":"rgba(255,255,255,0.5)",cursor:"pointer",fontSize:12,fontWeight:hullPanelMode===id?700:400}}>{label}</button>
+      ))}
+    </div>
+    <DropZone {...{fileRef,folderRef,uploads,handleFiles,onDragOver,onDragLeave,onDrop}} /><SpotlightFilmstrip {...{uploads,selectedIdx,setSelectedIdx,removeUpload,clearUploads}} /><ImageActionButtons uploads={uploads} loading={loading} detectAll={detectAll} genPDF={genPDF} exportCSV={exportCSV} latestDetForTab={det} onOpenCompliance={onOpenCompliance} scanLabel="Run Hull Scan" /><StatusBar error={error} /><PrivacyTimer countdown={privacyCountdown} cert={deletionCert} />{selectedUpload&&<DetectionResultsPanel detResult={selectedUpload.detResult} preview={selectedUpload.preview} exportCSV={exportCSV} />}{det&&<DisagreementFlag insp1Sev={insp1Sev} setInsp1Sev={setInsp1Sev} insp2Sev={insp2Sev} setInsp2Sev={setInsp2Sev} />}
+  </>);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PAGE: VIDEO
 // ═══════════════════════════════════════════════════════════════════════════
-function VideoPage({videoFile,videoRef,setVideoFile,onDragOver,onDragLeave,analyzeVideo,genVideoPDF,sendVideoPDFToWa,sendCompletionAlert,completionAlertSent,videoLoading,sendingWa,waMessage,videoResult,error}) {
-  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Video Analysis</div><h2 className="section-title">Video Analysis</h2><p className="section-desc">Upload underwater inspection footage for frame-sampled anomaly detection.</p><div className="section-rule" /></div><div className="card mb-20"><div className="card-title">Video Upload</div><div className="dropzone" onClick={()=>videoRef.current?.click()} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={(e)=>{e.preventDefault();e.currentTarget.classList.remove("drag-over");setVideoFile(e.dataTransfer.files[0]);}}><div className="dz-icon">🎬</div><div className="dz-label">{videoFile?"Click or drop to replace":"Drop video file here"}</div><div className="dz-hint">Supported: MP4, AVI, MOV</div>{videoFile&&<div className="dz-file">✓ {videoFile.name}</div>}</div><input ref={videoRef} type="file" accept="video/*" hidden onChange={(e)=>setVideoFile(e.target.files[0])} /></div><div className="row mb-20" style={{gap:10,flexWrap:"wrap"}}><button className="btn btn-primary" disabled={!videoFile||videoLoading} onClick={analyzeVideo}>{videoLoading&&<span className="spinner" />} Analyze Video</button><button className="btn btn-ghost" disabled={!videoFile} onClick={genVideoPDF}>📄 PDF</button><button className="btn btn-ghost" disabled={!videoFile||sendingWa} onClick={sendVideoPDFToWa}>{sendingWa?"…":"📱 WhatsApp"}</button>{videoResult&&<button className="btn btn-ghost" disabled={sendingWa||completionAlertSent} onClick={()=>sendCompletionAlert("video")}>{completionAlertSent?"✓ Sent":"🔔 Alert"}</button>}</div><StatusBar error={error} waMessage={waMessage} />{videoResult&&(<div style={{marginTop:20}}><div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:16}}><StatBox label="Detections" value={videoResult.total_detections??0} color="#22d3ee" />{videoResult.grade&&<StatBox label="Grade" value={videoResult.grade} color="#22c55e" />}{videoResult.risk_score!=null&&<StatBox label="Risk" value={`${videoResult.risk_score}%`} color="#f59e0b" />}</div>{videoResult.frames?.length>0&&<div className="card"><div className="card-title" style={{marginBottom:12}}>Sampled Frames</div><div style={{display:"flex",flexWrap:"wrap",gap:10}}>{videoResult.frames.map((f,i)=><img key={i} src={`data:image/jpeg;base64,${f}`} alt={`Frame ${i}`} style={{width:200,borderRadius:6}} />)}</div></div>}</div>)}</>);
+function VideoPage({videoFile,videoRef,setVideoFile,onDragOver,onDragLeave,analyzeVideo,genVideoPDF,exportAnnotatedVideo,videoLoading,videoPdfLoading,videoExportLoading,videoResult,error}) {
+  return (
+    <>
+      <div className="section-header fade-up">
+        <div className="section-crumb">Module · Video Analysis</div>
+        <h2 className="section-title">Video Analysis</h2>
+        <div className="section-rule" />
+      </div>
+      <VideoLiveAnalysis
+        videoFile={videoFile}
+        videoRef={videoRef}
+        setVideoFile={setVideoFile}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        analyzeVideo={analyzeVideo}
+        genVideoPDF={genVideoPDF}
+        exportAnnotatedVideo={exportAnnotatedVideo}
+        videoLoading={videoLoading}
+        videoPdfLoading={videoPdfLoading}
+        videoExportLoading={videoExportLoading}
+        videoResult={videoResult}
+        error={error}
+      />
+    </>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -338,14 +500,14 @@ function CombinedPipelineRoute({uploads}) {
   if (!all.length) return null;
   const item=all[cur]; const imgSrc=item.detResult?.annotated_b64?`data:image/jpeg;base64,${item.detResult.annotated_b64}`:item.preview;
   const dets=item.detResult?.detections||[]; const total=item.detResult?.total??dets.length;
-  return (<div className="card" style={{marginBottom:20,padding:0,overflow:"hidden"}}><div style={{padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid rgba(255,255,255,0.06)"}}><div style={{fontSize:11,opacity:0.4,letterSpacing:1,textTransform:"uppercase"}}>Combined Pipeline View · {all.length} Segments</div><div style={{display:"flex",alignItems:"center",gap:12}}>{item.detResult&&<div style={{display:"flex",gap:8}}>{[["Grade",item.detResult.grade??"—","#a78bfa"],["Risk",(item.detResult.risk_score??"—")+"%","#f59e0b"],["Defects",total,"#22d3ee"]].map(([l,v,c])=><span key={l} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:c+"15",color:c,fontWeight:700}}>{l}: {v}</span>)}</div>}<div style={{fontSize:12,opacity:0.6,fontFamily:"monospace"}}>{cur+1} / {all.length}</div></div></div><div style={{position:"relative",background:"#000",minHeight:480}}><img src={imgSrc} alt={`Seg ${cur+1}`} style={{width:"100%",height:480,objectFit:"contain",display:"block"}} /><div style={{position:"absolute",top:14,left:14,display:"flex",gap:8}}><div style={{padding:"6px 12px",borderRadius:6,background:"rgba(0,0,0,0.7)",fontSize:13,fontWeight:700,color:"#22d3ee"}}>Segment {cur+1}</div><div style={{padding:"6px 12px",borderRadius:6,background:"rgba(0,0,0,0.6)",fontSize:11,color:"rgba(255,255,255,0.6)",maxWidth:300,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.file.name}</div></div>{cur>0&&<button onClick={()=>setCur(cur-1)} style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",width:44,height:44,borderRadius:"50%",background:"rgba(0,0,0,0.6)",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>}{cur<all.length-1&&<button onClick={()=>setCur(cur+1)} style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",width:44,height:44,borderRadius:"50%",background:"rgba(0,0,0,0.6)",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>→</button>}</div><div style={{display:"flex",gap:4,padding:"10px 12px",overflowX:"auto",background:"rgba(255,255,255,0.02)",borderTop:"1px solid rgba(255,255,255,0.06)"}}>{all.map((u,i)=><button key={u.id} onClick={()=>setCur(i)} style={{flexShrink:0,width:72,height:52,borderRadius:6,overflow:"hidden",border:i===cur?"2px solid #22d3ee":"1px solid rgba(255,255,255,0.08)",cursor:"pointer",padding:0,background:"none",position:"relative"}}><img src={u.detResult?.annotated_b64?`data:image/jpeg;base64,${u.detResult.annotated_b64}`:u.preview} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} /><div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(0,0,0,0.7)",fontSize:8,color:i===cur?"#22d3ee":"rgba(255,255,255,0.5)",textAlign:"center",padding:"1px 0",fontWeight:i===cur?700:400}}>Seg {i+1}</div></button>)}</div></div>);
+  return (<div className="card" style={{marginBottom:20,padding:0,overflow:"hidden"}}><div style={{padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid rgba(255,255,255,0.06)"}}><div style={{fontSize:11,opacity:0.4,letterSpacing:1,textTransform:"uppercase"}}>Combined Pipeline View · {all.length} Segments</div><div style={{display:"flex",alignItems:"center",gap:12}}>{item.detResult&&<div style={{display:"flex",gap:8}}>{[["Grade",item.detResult.grade??"—","#a78bfa"],["Inspection",(item.detResult.risk_score??"—")+"%","#f59e0b"],["Defects",total,"#22d3ee"]].map(([l,v,c])=><span key={l} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:c+"15",color:c,fontWeight:700}}>{l}: {v}</span>)}</div>}<div style={{fontSize:12,opacity:0.6,fontFamily:"monospace"}}>{cur+1} / {all.length}</div></div></div><div style={{position:"relative",background:"#000",minHeight:480}}><img src={imgSrc} alt={`Seg ${cur+1}`} style={{width:"100%",height:480,objectFit:"contain",display:"block"}} /><div style={{position:"absolute",top:14,left:14,display:"flex",gap:8}}><div style={{padding:"6px 12px",borderRadius:6,background:"rgba(0,0,0,0.7)",fontSize:13,fontWeight:700,color:"#22d3ee"}}>Segment {cur+1}</div><div style={{padding:"6px 12px",borderRadius:6,background:"rgba(0,0,0,0.6)",fontSize:11,color:"rgba(255,255,255,0.6)",maxWidth:300,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.file.name}</div></div>{cur>0&&<button onClick={()=>setCur(cur-1)} style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",width:44,height:44,borderRadius:"50%",background:"rgba(0,0,0,0.6)",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>}{cur<all.length-1&&<button onClick={()=>setCur(cur+1)} style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",width:44,height:44,borderRadius:"50%",background:"rgba(0,0,0,0.6)",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>→</button>}</div><div style={{display:"flex",gap:4,padding:"10px 12px",overflowX:"auto",background:"rgba(255,255,255,0.02)",borderTop:"1px solid rgba(255,255,255,0.06)"}}>{all.map((u,i)=><button key={u.id} onClick={()=>setCur(i)} style={{flexShrink:0,width:72,height:52,borderRadius:6,overflow:"hidden",border:i===cur?"2px solid #22d3ee":"1px solid rgba(255,255,255,0.08)",cursor:"pointer",padding:0,background:"none",position:"relative"}}><img src={u.detResult?.annotated_b64?`data:image/jpeg;base64,${u.detResult.annotated_b64}`:u.preview} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} /><div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(0,0,0,0.7)",fontSize:8,color:i===cur?"#22d3ee":"rgba(255,255,255,0.5)",textAlign:"center",padding:"1px 0",fontWeight:i===cur?700:400}}>Seg {i+1}</div></button>)}</div></div>);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PAGE: PIPELINE — Combined + All 3D + Active Twin + 2D
 // ═══════════════════════════════════════════════════════════════════════════
 function PipelinePage(props) {
-  const {uploads,selectedUpload,selectedIdx,setSelectedIdx,fileRef,folderRef,handleFiles,removeUpload,clearUploads,onDragOver,onDragLeave,onDrop,detectAll,genPDF,sendPDFToWa,sendCompletionAlert,completionAlertSent,sendingWa,waMessage,exportCSV,loading,error,privacyCountdown,deletionCert,insp1Sev,setInsp1Sev,insp2Sev,setInsp2Sev,onOpenCompliance}=props;
+  const {uploads,selectedUpload,selectedIdx,setSelectedIdx,fileRef,folderRef,handleFiles,removeUpload,clearUploads,onDragOver,onDragLeave,onDrop,detectAll,genPDF,exportCSV,loading,error,privacyCountdown,deletionCert,insp1Sev,setInsp1Sev,insp2Sev,setInsp2Sev,onOpenCompliance}=props;
   var det=uploads.find(function(x){return x.detResult;})?.detResult||null;
   var singleRef=useRef(null);
   var [mode,setMode]=useState("combined");
@@ -357,11 +519,11 @@ function PipelinePage(props) {
   useEffect(function(){if(mode==="single3d"){var t=setTimeout(postSingle,300);return function(){clearTimeout(t);};}}, [selectedUpload,mode]);
 
   return (<>
-    <div className="section-header fade-up"><div className="section-crumb">Module · Pipeline Inspection</div><h2 className="section-title">Pipeline Inspection</h2><p className="section-desc">Upload multiple images — each image = one pipeline segment.</p><div className="section-rule" /></div>
+    <div className="section-header fade-up"><div className="section-crumb">Module · Pipeline Inspection</div><h2 className="section-title">Pipeline Inspection</h2><div className="section-rule" /></div>
     <DropZone {...{fileRef,folderRef,uploads,handleFiles,onDragOver,onDragLeave,onDrop}} />
     <SpotlightFilmstrip {...{uploads,selectedIdx,setSelectedIdx,removeUpload,clearUploads}} />
-    <ImageActionButtons uploads={uploads} loading={loading} detectAll={detectAll} genPDF={genPDF} sendPDFToWa={sendPDFToWa} sendCompletionAlert={sendCompletionAlert} completionAlertSent={completionAlertSent} sendingWa={sendingWa} exportCSV={exportCSV} latestDetForTab={det} onOpenCompliance={onOpenCompliance} scanLabel="Run Pipeline Scan" />
-    <StatusBar error={error} waMessage={waMessage} />
+    <ImageActionButtons uploads={uploads} loading={loading} detectAll={detectAll} genPDF={genPDF} exportCSV={exportCSV} latestDetForTab={det} onOpenCompliance={onOpenCompliance} scanLabel="Run Pipeline Scan" />
+    <StatusBar error={error} />
     <PrivacyTimer countdown={privacyCountdown} cert={deletionCert} />
     {uploads.length>0&&(<>
       <div style={{display:"flex",alignItems:"center",gap:0,marginBottom:16,borderRadius:8,overflow:"hidden",border:"1px solid rgba(34,211,238,0.2)",width:"fit-content"}}>
@@ -383,23 +545,287 @@ function PipelinePage(props) {
 // PAGE: CABLE
 // ═══════════════════════════════════════════════════════════════════════════
 function CablePage(props) {
-  const {uploads,selectedUpload,selectedIdx,setSelectedIdx,fileRef,folderRef,handleFiles,removeUpload,clearUploads,onDragOver,onDragLeave,onDrop,detectAll,genPDF,sendPDFToWa,sendCompletionAlert,completionAlertSent,sendingWa,waMessage,exportCSV,loading,error,privacyCountdown,deletionCert,insp1Sev,setInsp1Sev,insp2Sev,setInsp2Sev,onOpenCompliance}=props;
+  const {uploads,selectedUpload,selectedIdx,setSelectedIdx,fileRef,folderRef,handleFiles,removeUpload,clearUploads,onDragOver,onDragLeave,onDrop,detectAll,genPDF,exportCSV,loading,error,privacyCountdown,deletionCert,insp1Sev,setInsp1Sev,insp2Sev,setInsp2Sev,onOpenCompliance}=props;
   const det=uploads.find((x)=>x.detResult)?.detResult||null;
-  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Sub-sea Cable</div><h2 className="section-title">Sub-sea Cable Inspection</h2><p className="section-desc">Detect cable damage, abrasion, burial anomalies on subsea cables.</p><div className="section-rule" /></div><DropZone {...{fileRef,folderRef,uploads,handleFiles,onDragOver,onDragLeave,onDrop}} /><SpotlightFilmstrip {...{uploads,selectedIdx,setSelectedIdx,removeUpload,clearUploads}} /><ImageActionButtons uploads={uploads} loading={loading} detectAll={detectAll} genPDF={genPDF} sendPDFToWa={sendPDFToWa} sendCompletionAlert={sendCompletionAlert} completionAlertSent={completionAlertSent} sendingWa={sendingWa} exportCSV={exportCSV} latestDetForTab={det} onOpenCompliance={onOpenCompliance} scanLabel="Run Cable Scan" /><StatusBar error={error} waMessage={waMessage} /><PrivacyTimer countdown={privacyCountdown} cert={deletionCert} />{selectedUpload&&<DetectionResultsPanel detResult={selectedUpload.detResult} preview={selectedUpload.preview} exportCSV={exportCSV} />}{det&&<DisagreementFlag insp1Sev={insp1Sev} setInsp1Sev={setInsp1Sev} insp2Sev={insp2Sev} setInsp2Sev={setInsp2Sev} />}</>);
+  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Sub-sea Cable</div><h2 className="section-title">Sub-sea Cable Inspection</h2><div className="section-rule" /></div><DropZone {...{fileRef,folderRef,uploads,handleFiles,onDragOver,onDragLeave,onDrop}} /><SpotlightFilmstrip {...{uploads,selectedIdx,setSelectedIdx,removeUpload,clearUploads}} /><ImageActionButtons uploads={uploads} loading={loading} detectAll={detectAll} genPDF={genPDF} exportCSV={exportCSV} latestDetForTab={det} onOpenCompliance={onOpenCompliance} scanLabel="Run Cable Scan" /><StatusBar error={error} /><PrivacyTimer countdown={privacyCountdown} cert={deletionCert} />{selectedUpload&&<DetectionResultsPanel detResult={selectedUpload.detResult} preview={selectedUpload.preview} exportCSV={exportCSV} />}{det&&<DisagreementFlag insp1Sev={insp1Sev} setInsp1Sev={setInsp1Sev} insp2Sev={insp2Sev} setInsp2Sev={setInsp2Sev} />}</>);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PAGE: DASHBOARD
+// PAGE: DASHBOARD — Inspection / Mission Control (reference layout)
 // ═══════════════════════════════════════════════════════════════════════════
-function DashPage({detResult,videoResult,sessionDetections,reportsGenerated}) {
-  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Dashboard</div><h2 className="section-title">Mission Dashboard</h2><div className="section-rule" /></div><div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:24}}><BigStat label="Session Detections" value={sessionDetections??0} color="#22d3ee" /><BigStat label="Reports" value={reportsGenerated??0} color="#a78bfa" /><BigStat label="Risk Score" value={detResult?.risk_score!=null?`${detResult.risk_score}%`:"—"} color="#f59e0b" /><BigStat label="Grade" value={detResult?.grade??"—"} color="#22c55e" /></div>{detResult?<DetectionResultsPanel detResult={detResult} exportCSV={()=>{}} />:<div className="card" style={{textAlign:"center",padding:"48px 24px",opacity:0.4}}><div style={{fontSize:32,marginBottom:12}}>📊</div><div>Run a detection to see results.</div></div>}</>);
+function DashboardSonar({ dets, imgW, imgH }) {
+  const dots = useMemo(() => {
+    const W = imgW || 1280;
+    const H = imgH || 720;
+    const list = (dets || []).slice(0, 14);
+    return list.map((d, i) => {
+      const x1 = d.x1 ?? 0;
+      const x2 = d.x2 ?? W;
+      const y1 = d.y1 ?? 0;
+      const y2 = d.y2 ?? H;
+      const cx = ((x1 + x2) / 2 / W) - 0.5;
+      const cy = ((y1 + y2) / 2 / H) - 0.5;
+      const angle = Math.atan2(cy, cx);
+      const dist = Math.min(0.48, Math.sqrt(cx * cx + cy * cy) * 1.1);
+      const rPct = 22 + dist * 58;
+      const left = 50 + rPct * Math.cos(angle + Math.PI / 2);
+      const top = 50 + rPct * Math.sin(angle + Math.PI / 2);
+      const sev = (d.severity || "").toLowerCase();
+      const color = sev === "critical" ? "#ef4444" : sev === "high" ? "#f97316" : "#22d3ee";
+      return { left, top, color, key: `${i}-${d.id ?? i}` };
+    });
+  }, [dets, imgW, imgH]);
+  return (
+    <div className="dash-sonar">
+      <div className="dash-sonar-sweep" />
+      {dots.map((dot) => (
+        <div key={dot.key} className="dash-sonar-dot" style={{ left: `${dot.left}%`, top: `${dot.top}%`, background: dot.color, color: dot.color }} />
+      ))}
+      <div className="dash-sonar-label">DETECTION SONAR</div>
+    </div>
+  );
+}
+
+function DashPage({ detResult, sessionDetections, reportsGenerated }) {
+  const gaugeGradId = useId().replace(/:/g, "");
+  const stats = useMemo(() => {
+    const dets = detResult?.detections ?? [];
+    const total = detResult?.total ?? dets.length;
+    const classes = [...new Set(dets.map((d) => d.cls ?? d.class).filter(Boolean))];
+    const avgConf = total ? dets.reduce((s, d) => s + (Number(d.conf) || 0), 0) / total : 0;
+    const highConf = dets.filter((d) => (Number(d.conf) || 0) >= 0.5).length;
+    const sev = detResult?.sev_counts ?? { Critical: 0, High: 0, Medium: 0, Low: 0 };
+    const insp = detResult?.risk_score ?? 0;
+    const threat = Math.max(0, Math.min(100, Math.round(100 - insp)));
+    const imgW = detResult?.img_width ?? 1280;
+    const imgH = detResult?.img_height ?? 720;
+    const byClass = {};
+    for (const d of dets) {
+      const c = d.cls ?? d.class ?? "Unknown";
+      byClass[c] = (byClass[c] ?? 0) + 1;
+    }
+    const breakdown = Object.entries(byClass)
+      .sort((a, b) => b[1] - a[1])
+      .map(([cls, count]) => ({ cls, count, share: total ? ((count / total) * 100).toFixed(1) : "0" }));
+    return { dets, total, classes, avgConf, highConf, sev, insp, threat, breakdown, imgW, imgH };
+  }, [detResult]);
+
+  const previewSrc = detResult?.annotated_b64
+    ? `data:image/jpeg;base64,${detResult.annotated_b64}`
+    : detResult?.enhanced_b64
+      ? `data:image/jpeg;base64,${detResult.enhanced_b64}`
+      : null;
+
+  const R = 54;
+  const C = 2 * Math.PI * R;
+  const threatPct = stats.threat;
+  const gaugeDash = C * (1 - threatPct / 100);
+
+  let riskMsg = "Healthy — Continue Monitoring";
+  let riskStrong = `${threatPct.toFixed(1)}%`;
+  let riskColor = "#facc15";
+  let statusColor = "#4ade80";
+  if (threatPct >= 70) {
+    riskMsg = "Critical attention required";
+    riskColor = "#ef4444";
+    statusColor = "#ef4444";
+  } else if (threatPct >= 40) {
+    riskMsg = "Elevated — Review recommended";
+    riskColor = "#facc15";
+    statusColor = "#facc15";
+  }
+
+  const grade = detResult?.grade ?? "—";
+  const gUp = String(grade).toUpperCase();
+  const gradeCardClass =
+    gUp === "A" || gUp === "B" ? "dash-kpi-card dash-kpi-card--green" : gUp === "C" ? "dash-kpi-card dash-kpi-card--yellow" : "dash-kpi-card dash-kpi-card--red";
+
+  const markerLeft = `${Math.min(96, Math.max(4, threatPct))}%`;
+
+  return (
+    <div className="inspection-dashboard fade-up">
+      <div className="inspection-dashboard__crumb">
+        ANALYTICS <span>›</span> OVERVIEW
+      </div>
+      <h1 className="inspection-dashboard__title">Inspection Dashboard</h1>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20, fontSize: 11, opacity: 0.65 }}>
+        <span style={{ padding: "4px 10px", borderRadius: 8, border: "1px solid rgba(0,229,255,0.2)", background: "rgba(0,229,255,0.06)" }}>
+          Session detections: <strong style={{ color: "#22d3ee" }}>{sessionDetections ?? 0}</strong>
+        </span>
+        <span style={{ padding: "4px 10px", borderRadius: 8, border: "1px solid rgba(167,139,250,0.2)", background: "rgba(167,139,250,0.06)" }}>
+          Reports: <strong style={{ color: "#a78bfa" }}>{reportsGenerated ?? 0}</strong>
+        </span>
+      </div>
+
+      <div className="dash-mission-control">
+        <div className="dash-mc-left">
+          <div className="dash-gauge-wrap">
+            <svg width="140" height="140" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
+              <circle
+                cx="60"
+                cy="60"
+                r={R}
+                fill="none"
+                stroke={`url(#${gaugeGradId})`}
+                strokeWidth="10"
+                strokeLinecap="round"
+                strokeDasharray={C}
+                strokeDashoffset={gaugeDash}
+              />
+              <defs>
+                <linearGradient id={gaugeGradId} x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#00ffaa" />
+                  <stop offset="50%" stopColor="#22d3ee" />
+                  <stop offset="100%" stopColor="#00e5ff" />
+                </linearGradient>
+              </defs>
+            </svg>
+            <div className="dash-gauge-value">
+              <strong>{threatPct}</strong>
+              <small>RISK %</small>
+            </div>
+          </div>
+          <div className="dash-mc-label">THREAT LEVEL</div>
+        </div>
+
+        <div className="dash-mc-center">
+          <div className="dash-video-panel">
+            <div className="dash-video-overlay-label">OBJECTS DETECTED</div>
+            {previewSrc ? (
+              <>
+                <img src={previewSrc} alt="Latest detection frame" />
+                <div className="dash-play-btn" aria-hidden title="Still frame from last detection">
+                  ▶
+                </div>
+              </>
+            ) : (
+              <div className="dash-video-placeholder">
+                <span style={{ fontSize: 36, opacity: 0.25 }}>◇</span>
+                Run <strong style={{ color: "#22d3ee" }}>Anomaly Scan</strong> to populate this viewport
+              </div>
+            )}
+          </div>
+          <div className="dash-avg-conf">{(stats.avgConf * 100).toFixed(1)}% AVG CONFIDENCE</div>
+        </div>
+
+        <div className="dash-mc-right">
+          <div className="dash-kpi-card">
+            <strong style={{ color: "#22d3ee" }}>{stats.total}</strong>
+            <span>OBJECTS DETECTED</span>
+          </div>
+          <div className="dash-kpi-card dash-kpi-card--green">
+            <strong>{stats.classes.length}</strong>
+            <span>ANOMALY CLASSES</span>
+          </div>
+          <div className="dash-kpi-card dash-kpi-card--yellow">
+            <strong>{(stats.avgConf * 100).toFixed(1)}%</strong>
+            <span>AVG CONFIDENCE</span>
+          </div>
+          <div className={gradeCardClass}>
+            <strong>{grade}</strong>
+            <span>MISSION GRADE</span>
+          </div>
+          <DashboardSonar dets={stats.dets} imgW={stats.imgW} imgH={stats.imgH} />
+        </div>
+      </div>
+
+      <div className="dash-severity-bar">
+        <div className="dash-sev-seg" style={{ flex: Math.max(0.5, stats.sev.Low), background: "rgba(74,222,128,0.15)", color: "#4ade80" }}>
+          Low <span>- {stats.sev.Low}</span>
+        </div>
+        <div className="dash-sev-seg" style={{ flex: Math.max(0.5, stats.sev.Medium), background: "rgba(245,158,11,0.12)", color: "#f59e0b" }}>
+          Medium <span>- {stats.sev.Medium}</span>
+        </div>
+        <div className="dash-sev-seg" style={{ flex: Math.max(0.5, stats.sev.High), background: "rgba(249,115,22,0.15)", color: "#f97316" }}>
+          High <span>- {stats.sev.High}</span>
+        </div>
+        <div className="dash-sev-seg" style={{ flex: Math.max(0.5, stats.sev.Critical), background: "rgba(239,68,68,0.22)", color: "#ef4444" }}>
+          Critical <span>- {stats.sev.Critical}</span>
+        </div>
+      </div>
+
+      <div className="dash-summary-grid">
+        <div className="dash-summary-card">
+          <div className="dash-sum-val" style={{ color: "#22d3ee" }}>
+            {stats.total}
+          </div>
+          <div className="dash-sum-lbl">TOTAL DETECTIONS</div>
+        </div>
+        <div className="dash-summary-card">
+          <div className="dash-sum-val" style={{ color: "#4ade80" }}>
+            {stats.classes.length}
+          </div>
+          <div className="dash-sum-lbl">UNIQUE CLASSES</div>
+        </div>
+        <div className="dash-summary-card">
+          <div className="dash-sum-val" style={{ color: "#facc15" }}>
+            {(stats.avgConf * 100).toFixed(1)}%
+          </div>
+          <div className="dash-sum-lbl">AVG CONFIDENCE</div>
+        </div>
+        <div className="dash-summary-card">
+          <div className="dash-sum-val" style={{ color: "#ef4444" }}>
+            {stats.highConf}
+          </div>
+          <div className="dash-sum-lbl">HIGH CONFIDENCE</div>
+        </div>
+      </div>
+
+      <div className="dash-risk-panel">
+        <div className="dash-risk-head">
+          <strong style={{ color: riskColor }}>{riskStrong}</strong>
+          <em style={{ color: statusColor }}>{riskMsg}</em>
+        </div>
+        <div className="dash-risk-gradient">
+          <div className="dash-risk-marker" style={{ left: markerLeft }} />
+        </div>
+        <div className="dash-risk-labels">
+          <span style={{ color: "#22c55e" }}>LOW</span>
+          <span style={{ color: "#facc15" }}>MODERATE</span>
+          <span style={{ color: "#ef4444" }}>CRITICAL</span>
+        </div>
+      </div>
+
+      <div className="dash-breakdown">
+        <div className="dash-breakdown-header">DETECTION BREAKDOWN</div>
+        <table>
+          <thead>
+            <tr>
+              <th>CLASS</th>
+              <th>COUNT</th>
+              <th>SHARE</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stats.breakdown.length === 0 ? (
+              <tr>
+                <td colSpan={3} style={{ opacity: 0.45, fontStyle: "italic" }}>
+                  No classes yet — run a detection from Anomaly Scan.
+                </td>
+              </tr>
+            ) : (
+              stats.breakdown.map((row) => (
+                <tr key={row.cls}>
+                  <td style={{ fontWeight: 600 }}>{row.cls}</td>
+                  <td style={{ fontFamily: "JetBrains Mono, monospace", color: "#22d3ee" }}>{row.count}</td>
+                  <td style={{ opacity: 0.75 }}>{row.share}%</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PAGE: MEMORY
 // ═══════════════════════════════════════════════════════════════════════════
 function MemoryPage({missions}) {
-  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Mission Memory</div><h2 className="section-title">Mission Memory</h2><div className="section-rule" /></div>{missions.length===0?<div className="card" style={{textAlign:"center",padding:"48px 24px",opacity:0.4}}><div style={{fontSize:32,marginBottom:12}}>🧠</div><div>No missions yet.</div></div>:<div className="card" style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>{["Mission ID","Date","Vessel","Mode","Grade","Risk","Dets","Classes"].map((h)=><th key={h} style={{padding:"8px 12px",textAlign:"left",opacity:0.45,fontSize:11,fontWeight:600}}>{h}</th>)}</tr></thead><tbody>{missions.map((m)=>(<tr key={m.id} style={{borderBottom:"1px solid rgba(255,255,255,0.04)"}}><td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:11,color:"#22d3ee"}}>{m.id}</td><td style={{padding:"10px 12px",fontSize:11,opacity:0.6}}>{new Date(m.date).toLocaleString()}</td><td style={{padding:"10px 12px",fontWeight:600}}>{m.vessel}</td><td style={{padding:"10px 12px",opacity:0.7,textTransform:"capitalize"}}>{m.mode}</td><td style={{padding:"10px 12px",color:"#a78bfa",fontWeight:700}}>{m.grade}</td><td style={{padding:"10px 12px",color:"#f59e0b",fontWeight:700}}>{m.risk}%</td><td style={{padding:"10px 12px",color:"#22d3ee"}}>{m.total}</td><td style={{padding:"10px 12px",fontSize:11,opacity:0.6}}>{m.classes?.join(", ")||"—"}</td></tr>))}</tbody></table></div>}</>);
+  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Mission Memory</div><h2 className="section-title">Mission Memory</h2><div className="section-rule" /></div>{missions.length===0?<div className="card" style={{textAlign:"center",padding:"48px 24px",opacity:0.4}}><div style={{fontSize:32,marginBottom:12}}>🧠</div><div>No missions yet.</div></div>:<div className="card" style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.08)"}}>{["Mission ID","Date","Vessel","Mode","Grade","Insp. score","Dets","Classes"].map((h)=><th key={h} style={{padding:"8px 12px",textAlign:"left",opacity:0.45,fontSize:11,fontWeight:600}}>{h}</th>)}</tr></thead><tbody>{missions.map((m)=>(<tr key={m.id} style={{borderBottom:"1px solid rgba(255,255,255,0.04)"}}><td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:11,color:"#22d3ee"}}>{m.id}</td><td style={{padding:"10px 12px",fontSize:11,opacity:0.6}}>{new Date(m.date).toLocaleString()}</td><td style={{padding:"10px 12px",fontWeight:600}}>{m.vessel}</td><td style={{padding:"10px 12px",opacity:0.7,textTransform:"capitalize"}}>{m.mode}</td><td style={{padding:"10px 12px",color:"#a78bfa",fontWeight:700}}>{m.grade}</td><td style={{padding:"10px 12px",color:"#f59e0b",fontWeight:700}}>{m.risk}%</td><td style={{padding:"10px 12px",color:"#22d3ee"}}>{m.total}</td><td style={{padding:"10px 12px",fontSize:11,opacity:0.6}}>{m.classes?.join(", ")||"—"}</td></tr>))}</tbody></table></div>}</>);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -416,7 +842,7 @@ function ZeroShotPage({zeroShotClasses,setZeroShotClasses,uploads,fileRef,folder
   const [input,setInput]=useState(""); const [running,setRunning]=useState(false); const [results,setResults]=useState([]);
   const add=()=>{const v=input.trim();if(v&&!zeroShotClasses.includes(v))setZeroShotClasses((p)=>[...p,v]);setInput("");};
   const run=async()=>{if(!uploads.length||!zeroShotClasses.length)return;setRunning(true);await new Promise((r)=>setTimeout(r,1500));setResults(zeroShotClasses.map((cls)=>({cls,found:Math.random()>0.4,conf:Math.random()*0.4+0.5})));setRunning(false);};
-  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Zero-Shot</div><h2 className="section-title">Zero-Shot Detection</h2><p className="section-desc">Define any defect class in natural language.</p><div className="section-rule" /></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}><div><div className="card" style={{marginBottom:16}}><div className="card-title" style={{marginBottom:12}}>Add Classes</div><div style={{display:"flex",gap:8,marginBottom:12}}><input className="ctrl-input" style={{flex:1}} placeholder="e.g. marine growth" value={input} onChange={(e)=>setInput(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&add()} /><button className="btn btn-primary" onClick={add}>Add</button></div><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{zeroShotClasses.length===0?<span style={{fontSize:12,opacity:0.3}}>No classes</span>:zeroShotClasses.map((cls)=>(<span key={cls} style={{display:"inline-flex",alignItems:"center",gap:6,padding:"4px 10px",background:"rgba(34,211,238,0.1)",border:"1px solid rgba(34,211,238,0.3)",borderRadius:20,fontSize:12,color:"#22d3ee"}}>{cls}<button onClick={()=>setZeroShotClasses((p)=>p.filter((c)=>c!==cls))} style={{background:"none",border:"none",color:"#22d3ee",cursor:"pointer"}}>×</button></span>))}</div></div><button className="btn btn-primary" disabled={!uploads.length||!zeroShotClasses.length||running} onClick={run} style={{width:"100%"}}>{running?"Running...":"🎯 Run Zero-Shot"}</button></div><div><DropZone {...{fileRef,folderRef,uploads,handleFiles,onDragOver,onDragLeave,onDrop}} />{results.length>0&&<div className="card"><div className="card-title" style={{marginBottom:12}}>Results</div>{results.map((r)=>(<div key={r.cls} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}><span style={{width:10,height:10,borderRadius:"50%",background:r.found?"#22c55e":"#ef4444"}} /><span style={{flex:1,fontSize:13,fontWeight:600}}>{r.cls}</span>{r.found?<span style={{fontSize:12,color:"#22c55e",fontWeight:700}}>Found · {(r.conf*100).toFixed(1)}%</span>:<span style={{fontSize:12,opacity:0.4}}>Not detected</span>}</div>))}</div>}</div></div></>);
+  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Zero-Shot</div><h2 className="section-title">Zero-Shot Detection</h2><div className="section-rule" /></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}><div><div className="card" style={{marginBottom:16}}><div className="card-title" style={{marginBottom:12}}>Add Classes</div><div style={{display:"flex",gap:8,marginBottom:12}}><input className="ctrl-input" style={{flex:1}} placeholder="e.g. marine growth" value={input} onChange={(e)=>setInput(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&add()} /><button className="btn btn-primary" onClick={add}>Add</button></div><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{zeroShotClasses.length===0?<span style={{fontSize:12,opacity:0.3}}>No classes</span>:zeroShotClasses.map((cls)=>(<span key={cls} style={{display:"inline-flex",alignItems:"center",gap:6,padding:"4px 10px",background:"rgba(34,211,238,0.1)",border:"1px solid rgba(34,211,238,0.3)",borderRadius:20,fontSize:12,color:"#22d3ee"}}>{cls}<button onClick={()=>setZeroShotClasses((p)=>p.filter((c)=>c!==cls))} style={{background:"none",border:"none",color:"#22d3ee",cursor:"pointer"}}>×</button></span>))}</div></div><button className="btn btn-primary" disabled={!uploads.length||!zeroShotClasses.length||running} onClick={run} style={{width:"100%"}}>{running?"Running...":"🎯 Run Zero-Shot"}</button></div><div><DropZone {...{fileRef,folderRef,uploads,handleFiles,onDragOver,onDragLeave,onDrop}} />{results.length>0&&<div className="card"><div className="card-title" style={{marginBottom:12}}>Results</div>{results.map((r)=>(<div key={r.cls} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}><span style={{width:10,height:10,borderRadius:"50%",background:r.found?"#22c55e":"#ef4444"}} /><span style={{flex:1,fontSize:13,fontWeight:600}}>{r.cls}</span>{r.found?<span style={{fontSize:12,color:"#22c55e",fontWeight:700}}>Found · {(r.conf*100).toFixed(1)}%</span>:<span style={{fontSize:12,opacity:0.4}}>Not detected</span>}</div>))}</div>}</div></div></>);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -433,5 +859,5 @@ function DeadlinePage({detResult}) {
   const deadlines=calcDeadlines(detResult);
   if (!detResult) return (<><div className="section-header fade-up"><div className="section-crumb">Module · Deadlines</div><h2 className="section-title">Regulatory Deadline Tracker</h2><div className="section-rule" /></div><div className="card" style={{textAlign:"center",padding:"48px 24px",opacity:0.4}}><div style={{fontSize:32,marginBottom:12}}>⏰</div><div>Run a detection first.</div></div></>);
   const urgent=deadlines.filter((d)=>d.urgency==="critical"||d.urgency==="high");
-  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Deadlines</div><h2 className="section-title">Regulatory Deadline Tracker</h2><p className="section-desc">Auto-calculated deadlines based on IMO/SOLAS/DNV rules.</p><div className="section-rule" /></div>{urgent.length>0&&<div className="card" style={{marginBottom:20,padding:16,background:"#ef444411",border:"1px solid #ef444433"}}><div style={{fontSize:12,fontWeight:700,color:"#ef4444",marginBottom:8}}>🚨 {urgent.length} URGENT DEADLINE{urgent.length>1?"S":""}</div>{urgent.map((d,i)=><div key={i} style={{fontSize:12,marginBottom:4}}><strong style={{color:urgCol(d.urgency)}}>{d.body}</strong> — {d.type}: <strong>{daysTo(d.due)} days</strong></div>)}</div>}<div style={{display:"grid",gap:16}}>{deadlines.map((d,i)=>{const days=daysTo(d.due);const uc=urgCol(d.urgency);const pct=Math.min(100,Math.max(0,100-(days/365)*100));return(<div key={i} className="card" style={{padding:20,borderLeft:`4px solid ${uc}`}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}><div><div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:uc,textTransform:"uppercase",marginBottom:4}}>{d.body}</div><div style={{fontSize:16,fontWeight:700}}>{d.type}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:900,color:uc,fontFamily:"monospace"}}>{days}</div><div style={{fontSize:10,opacity:0.4}}>days remaining</div></div></div><div style={{height:6,borderRadius:3,background:"rgba(255,255,255,0.06)",overflow:"hidden",marginBottom:10}}><div style={{width:`${pct}%`,height:"100%",background:uc,borderRadius:3}} /></div><div style={{display:"flex",justifyContent:"space-between",fontSize:11}}><span style={{opacity:0.5}}>Due: {d.due.toLocaleDateString("en-GB")}</span><span style={{opacity:0.4,fontStyle:"italic",maxWidth:"60%",textAlign:"right"}}>{d.rule}</span></div></div>);})}</div><div style={{marginTop:20,padding:"12px 16px",background:"rgba(255,255,255,0.02)",borderRadius:8,border:"1px solid rgba(255,255,255,0.06)",fontSize:11,opacity:0.5}}>⚠️ Confirm deadlines with your class society surveyor.</div></>);
+  return (<><div className="section-header fade-up"><div className="section-crumb">Module · Deadlines</div><h2 className="section-title">Regulatory Deadline Tracker</h2><div className="section-rule" /></div>{urgent.length>0&&<div className="card" style={{marginBottom:20,padding:16,background:"#ef444411",border:"1px solid #ef444433"}}><div style={{fontSize:12,fontWeight:700,color:"#ef4444",marginBottom:8}}>🚨 {urgent.length} URGENT DEADLINE{urgent.length>1?"S":""}</div>{urgent.map((d,i)=><div key={i} style={{fontSize:12,marginBottom:4}}><strong style={{color:urgCol(d.urgency)}}>{d.body}</strong> — {d.type}: <strong>{daysTo(d.due)} days</strong></div>)}</div>}<div style={{display:"grid",gap:16}}>{deadlines.map((d,i)=>{const days=daysTo(d.due);const uc=urgCol(d.urgency);const pct=Math.min(100,Math.max(0,100-(days/365)*100));return(<div key={i} className="card" style={{padding:20,borderLeft:`4px solid ${uc}`}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}><div><div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:uc,textTransform:"uppercase",marginBottom:4}}>{d.body}</div><div style={{fontSize:16,fontWeight:700}}>{d.type}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:28,fontWeight:900,color:uc,fontFamily:"monospace"}}>{days}</div><div style={{fontSize:10,opacity:0.4}}>days remaining</div></div></div><div style={{height:6,borderRadius:3,background:"rgba(255,255,255,0.06)",overflow:"hidden",marginBottom:10}}><div style={{width:`${pct}%`,height:"100%",background:uc,borderRadius:3}} /></div><div style={{display:"flex",justifyContent:"space-between",fontSize:11}}><span style={{opacity:0.5}}>Due: {d.due.toLocaleDateString("en-GB")}</span><span style={{opacity:0.4,fontStyle:"italic",maxWidth:"60%",textAlign:"right"}}>{d.rule}</span></div></div>);})}</div><div style={{marginTop:20,padding:"12px 16px",background:"rgba(255,255,255,0.02)",borderRadius:8,border:"1px solid rgba(255,255,255,0.06)",fontSize:11,opacity:0.5}}>⚠️ Confirm deadlines with your class society surveyor.</div></>);
 }

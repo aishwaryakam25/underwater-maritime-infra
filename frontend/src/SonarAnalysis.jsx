@@ -1,7 +1,8 @@
 import React, { useState, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
-
-const API_BASE = "http://localhost:8000/api/sonar";
+import { downloadSonarReportPdf, runSonarAnalyze } from "./api";
+import { getApiBaseUrl } from "./apiConfig";
+import { isLikelyImageFile } from "./imageFiles";
 
 const SEVERITY_COLORS = {
   critical: { bg: "#FF1744", text: "#fff" },
@@ -50,7 +51,7 @@ function ImageWithDetections({ imageUrl, detections, width, height }) {
   );
 }
 
-export default function SonarAnalysis() {
+export default function SonarAnalysis({ vesselName = "", inspector: inspectorProp = "" }) {
   const [files, setFiles] = useState([]);
   const [previews, setPreviews] = useState([]);
   const [results, setResults] = useState([]);
@@ -65,8 +66,12 @@ export default function SonarAnalysis() {
   const folderInputRef = useRef(null);
 
   const handleFiles = useCallback((fileList) => {
-    const newFiles = Array.from(fileList).filter((f) => f.type.startsWith("image/"));
-    if (!newFiles.length) return;
+    const raw = Array.from(fileList || []);
+    const newFiles = raw.filter(isLikelyImageFile);
+    if (!newFiles.length) {
+      if (raw.length) setError("No supported images found — try JPG, PNG, BMP, TIFF, or WebP (folder picks on Windows often omit file types).");
+      return;
+    }
     setFiles((prev) => [...prev, ...newFiles]);
     const newPreviews = newFiles.map((f) => URL.createObjectURL(f));
     setPreviews((prev) => [...prev, ...newPreviews]);
@@ -90,6 +95,44 @@ export default function SonarAnalysis() {
     setSelectedIdx(0); setError("");
   };
 
+  const formatNetErr = (e, fallbackLabel) => {
+    const serverDetail = () => {
+      const data = e.response?.data;
+      if (data == null) return null;
+      if (typeof data === "string") {
+        try {
+          const j = JSON.parse(data);
+          if (typeof j.detail === "string") return j.detail;
+          if (Array.isArray(j.detail)) return j.detail.map((x) => x.msg || JSON.stringify(x)).join("; ");
+        } catch {
+          return data.length < 800 ? data : null;
+        }
+      }
+      if (typeof data === "object" && !Array.isArray(data)) {
+        const d = data.detail;
+        if (typeof d === "string") return d;
+        if (Array.isArray(d)) return d.map((x) => x.msg || JSON.stringify(x)).join("; ");
+      }
+      return null;
+    };
+    const fromApi = serverDetail();
+    if (fromApi) return fromApi;
+
+    const m = (e && e.message) || String(e);
+    if (m === "Failed to fetch" || m === "Network Error" || /network/i.test(m)) {
+      const configured = getApiBaseUrl();
+      const display = configured || `${typeof window !== "undefined" ? window.location.origin : ""} (dev proxy → :8000)`;
+      return (
+        `${fallbackLabel}: cannot reach the API (${display}). ` +
+        "Start the backend: open a terminal in the project folder and run " +
+        "`python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000`. " +
+        "If you use `npm start` on port 3000, requests are proxied to port 8000 (see frontend/package.json). " +
+        "Override with REACT_APP_API_BASE_URL if the API is elsewhere."
+      );
+    }
+    return m || fallbackLabel;
+  };
+
   const analyzeAll = async () => {
     if (!files.length) return;
     setLoading(true);
@@ -97,20 +140,14 @@ export default function SonarAnalysis() {
     try {
       const allResults = [];
       for (const file of files) {
-        const fd = new FormData();
-        fd.append("file", file);
-        const res = await fetch(`${API_BASE}/analyze?confidence_threshold=${confThreshold}`, {
-          method: "POST", body: fd,
-        });
-        if (!res.ok) throw new Error(`Failed to analyze ${file.name}`);
-        const data = await res.json();
+        const data = await runSonarAnalyze(file, confThreshold);
         allResults.push(data);
       }
       setResults(allResults);
       setSelectedIdx(0);
       setActiveTab("results");
     } catch (e) {
-      setError(e.message);
+      setError(formatNetErr(e, `Failed to analyze ${files[0]?.name || "image"}`));
     } finally {
       setLoading(false);
     }
@@ -122,33 +159,23 @@ export default function SonarAnalysis() {
   const totalCritical = results.reduce((s, r) => s + r.critical_count, 0);
   const totalHigh = results.reduce((s, r) => s + r.high_count, 0);
 
-  const downloadReport = () => {
-    const report = { images_analyzed: results.length, total_detections: totalDetections, total_critical: totalCritical, results };
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `sonar_batch_report_${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-  };
-
   const downloadPDF = async () => {
+    if (files.length !== results.length) {
+      alert(
+        `Cannot build PDF: ${files.length} file(s) selected but ${results.length} analysis result(s). ` +
+          "Use Analyze All again without clearing uploads, then download PDF.",
+      );
+      return;
+    }
     setPdfLoading(true);
     try {
-      const fd = new FormData();
-      fd.append("results_json", JSON.stringify(results));
-      fd.append("vessel_name", "");
-      fd.append("inspector", "NautiCAI AutoScan v1.0");
-      fd.append("inspection_mode", "General Inspection");
-      files.forEach((f) => fd.append("files", f));
-      const res = await fetch(`${API_BASE}/report/pdf`, { method: "POST", body: fd });
-      if (!res.ok) throw new Error(`PDF generation failed (${res.status})`);
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `NautiCAI_Sonar_Report_${new Date().toISOString().slice(0,10)}.pdf`;
-      a.click();
+      await downloadSonarReportPdf(files, results, {
+        vessel_name: vesselName || "",
+        inspector: inspectorProp || "NautiCAI AutoScan v1.0",
+        inspection_mode: "General Inspection",
+      });
     } catch (e) {
-      alert("PDF generation failed: " + e.message);
+      alert("PDF generation failed: " + formatNetErr(e, "PDF request failed"));
     } finally {
       setPdfLoading(false);
     }
@@ -160,7 +187,6 @@ export default function SonarAnalysis() {
       <div className="section-header fade-up">
         <div className="section-crumb">Module &middot; Sonar Analysis</div>
         <h2 className="section-title">Sonar Analysis</h2>
-        <p className="section-desc">Side-Scan Sonar image analysis &mdash; SubPipe Detection + Marine-PULSE Classification. Upload single or multiple images, or an entire folder.</p>
         <div className="section-rule" />
       </div>
 
@@ -199,8 +225,8 @@ export default function SonarAnalysis() {
               <button className="btn btn-ghost" onClick={() => folderInputRef.current?.click()}>{"\ud83d\udcc2"} Upload Folder</button>
               {files.length > 0 && <button className="btn btn-ghost" onClick={clearAll}>{"\u2716"} Clear All</button>}
             </div>
-            <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
-            <input ref={folderInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => handleFiles(e.target.files)} {...{ webkitdirectory:"", directory:"" }} />
+            <input ref={fileInputRef} type="file" accept="image/*,.jpg,.jpeg,.png,.bmp,.webp,.tif,.tiff" multiple hidden onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }} />
+            <input ref={folderInputRef} type="file" accept="image/*,.jpg,.jpeg,.png,.bmp,.webp,.tif,.tiff" multiple hidden onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }} webkitdirectory="" directory="" />
           </div>
 
           {/* Filmstrip */}
@@ -385,7 +411,6 @@ export default function SonarAnalysis() {
               style={{ background: pdfLoading ? "#1e3a5f" : "#0EA5E9" }}>
               {pdfLoading ? "\u23F3 Generating PDF..." : "\ud83d\udcc4 Download PDF Report"}
             </button>
-            <button className="btn btn-ghost" onClick={downloadReport}>{"\ud83d\udcd1"} Download Report (JSON)</button>
           </div>
         </motion.div>
       )}

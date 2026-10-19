@@ -1,0 +1,27 @@
+# Subsea pipeline defect taxonomy — use for YOLO training (adjust path/train/val).
+# Class ids match backend/defect_taxonomy.py SUBSEA_PIPELINE_DEFECTS
+
+path: .
+train: images/train
+val: images/val
+
+nc: 18
+names:
+  0: corrosion
+  1: pitting_corrosion
+  2: coating_damage
+  3: coating_disbondment
+  4: anode_damage
+  5: crack
+  6: weld_defect
+  7: dent
+  8: buckle
+  9: ovality
+  10: free_span
+  11: exposed_pipeline
+  12: buried_pipeline
+  13: scouring
+  14: debris
+  15: marine_growth
+  16: sediment_cover
+  17: leakage
