@@ -116,3 +116,17 @@ frontend/.cache/
 
 # local chat logs
 curs/
+
+# reading notes / summaries and root copies of docs (kept locally only)
+/docs/WORK-SUMMARY.md
+/docs/research_note.md
+/website/slogan-options.md
+/DEMO-LOCAL.md
+/DEPLOY-AWS.md
+/DEPLOY-GCP-GITHUB.md
+/DEPLOY-GCP.md
+/DEPLOY.md
+/DEPLOYMENT_CHECKLIST.md
+/FRONTEND-BACKEND-CONNECTIVITY.md
+/RUN-DEPLOY-STEPS.txt
+/WHATSAPP_SETUP.md
